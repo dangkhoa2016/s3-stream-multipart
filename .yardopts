@@ -1,0 +1,6 @@
+--no-private
+--markup markdown
+--output-dir docs/yard
+--protected
+src/**/*.rb
+README.md
