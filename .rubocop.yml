@@ -1,0 +1,247 @@
+inherit_from: .rubocop_todo.yml
+plugins: rubocop-minitest
+
+AllCops:
+  NewCops: enable
+  SuggestExtensions: false
+  TargetRubyVersion: 3.2
+  Exclude:
+    - temp/**/*
+    - "sig/**/*.rbs"
+    - manually/**/*
+    - usage/**/*
+    - vendor/**/*
+    - tmp_debug*
+    - sig/**/*
+
+inherit_mode:
+  merge:
+    - Exclude
+
+# ── Metrics — reasonable limits instead of blanket disable ──────────
+Metrics/AbcSize:
+  Max: 35
+  Exclude:
+    - 'src/concurrent/parallel_upload_runner.rb'
+    - 'src/core/base_client.rb'
+    - 'src/extras/helper.rb'
+    - 'tests/**/*'
+    - 'src/concurrent/parallel_downloader.rb'
+    - 'src/concurrent/parallel_uploader.rb'
+    - 'src/core/download_helpers.rb'
+    - 'src/core/http_signer.rb'
+    - 'src/core/upload_state_manager.rb'
+    - 'src/upload/multipart_upload.rb'
+    - 'src/upload/resume_upload.rb'
+Metrics/BlockLength:
+  Max: 80
+  Exclude:
+    - 'tests/**/*'
+    - 'src/concurrent/parallel_upload_runner.rb'
+Metrics/BlockNesting:
+  Max: 4
+Metrics/ClassLength:
+  Max: 500
+  Exclude:
+    - 'tests/**/*'
+Metrics/CyclomaticComplexity:
+  Max: 12
+  Exclude:
+    - 'tests/**/*'
+Metrics/MethodLength:
+  Max: 40
+  Exclude:
+    - 'tests/**/*'
+    - 'src/concurrent/parallel_upload_runner.rb'
+    - 'src/concurrent/parallel_download_runner.rb'
+    - 'src/core/base_client.rb'
+    - 'src/core/download_helpers.rb'
+    - 'src/core/http_signer.rb'
+    - 'src/s3_client.rb'
+    - 'src/s3_multi_bucket_client.rb'
+    - 'src/s3_multi_bucket_client/download.rb'
+    - 'src/s3_multi_bucket_client/upload.rb'
+Metrics/ModuleLength:
+  Max: 300
+Metrics/ParameterLists:
+  Max: 24
+Metrics/PerceivedComplexity:
+  Max: 20
+  Exclude:
+    - 'tests/**/*'
+
+# ── Style — keep existing conventions ──────────────────────────────
+Style/Documentation:
+  Enabled: false
+Style/FrozenStringLiteralComment:
+  Enabled: true
+Style/StringLiterals:
+  Enabled: false
+Style/SymbolArray:
+  Enabled: false
+Style/WordArray:
+  Enabled: false
+Style/ClassAndModuleChildren:
+  Enabled: false
+Style/GuardClause:
+  Enabled: true
+Style/IfUnlessModifier:
+  Enabled: false
+Style/WhileUntilModifier:
+  Enabled: false
+Style/NumericPredicate:
+  Enabled: false
+Style/CombinableLoops:
+  Enabled: false
+Style/InverseMethods:
+  Enabled: false
+Style/ParallelAssignment:
+  Enabled: false
+Style/CommentedKeyword:
+  Enabled: false
+Style/EmptyMethod:
+  Enabled: false
+Style/MultilineBlockChain:
+  Enabled: false
+Style/FormatStringToken:
+  Enabled: false
+Style/HashTransformKeys:
+  Enabled: false
+Style/HashTransformValues:
+  Enabled: false
+Style/HashEachMethods:
+  Enabled: false
+Style/EachWithObject:
+  Enabled: false
+Style/CaseLikeIf:
+  Enabled: false
+Style/ExplicitBlockArgument:
+  Enabled: false
+Style/OptionalBooleanParameter:
+  Enabled: false
+Style/GlobalStdStream:
+  Enabled: false
+Style/MapToHash:
+  Enabled: false
+Style/MapCompactWithConditionalBlock:
+  Enabled: false
+Style/NumberedParametersLimit:
+  Enabled: false
+Style/OpenStructUse:
+  Enabled: false
+Style/RedundantSelfAssignmentBranch:
+  Enabled: false
+Style/SelectByRegexp:
+  Enabled: false
+Style/SingleLineDoEndBlock:
+  Enabled: false
+Style/SlicingWithRange:
+  Enabled: false
+Style/StaticClass:
+  Enabled: false
+Style/FileOpen:
+  Exclude:
+    - 'tests/**/*'
+Style/FormatString:
+  Exclude:
+    - 'tests/**/*'
+Style/TrivialAccessors:
+  Exclude:
+    - 'tests/**/*'
+Style/RedundantReturn:
+  Enabled: true
+Style/RedundantBegin:
+  Enabled: true
+Style/NegatedIfElseCondition:
+  Enabled: true
+Style/OrAssignment:
+  Enabled: true
+Style/PreferredHashMethods:
+  Enabled: true
+Style/OneClassPerFile:
+  Exclude:
+    - 'tests/**/*'
+
+# ── Naming ──────────────────────────────────────────────────────────
+Naming/MethodParameterName:
+  Enabled: false
+Naming/MemoizedInstanceVariableName:
+  Enabled: false
+Naming/RescuedExceptionsVariableName:
+  Enabled: false
+Naming/PredicatePrefix:
+  Enabled: false
+Naming/VariableNumber:
+  Enabled: false
+Naming/FileName:
+  Exclude:
+    - 'Rakefile.rb'
+    - 'src/s3-upload.rb'
+
+# ── Layout — only the essentials ────────────────────────────────────
+Layout/LineLength:
+  Max: 160
+  Exclude:
+    - 'tests/**/*'
+Layout/EmptyLineAfterGuardClause:
+  Enabled: true
+Layout/TrailingWhitespace:
+  Enabled: true
+
+# ── Lint — important ────────────────────────────────────────────────
+Lint/AmbiguousBlockAssociation:
+  Enabled: false
+Lint/AmbiguousOperator:
+  Enabled: false
+Lint/AmbiguousRange:
+  Enabled: false
+Lint/BooleanSymbol:
+  Enabled: false
+Lint/EmptyClass:
+  Enabled: false
+Lint/EmptyBlock:
+  Enabled: false
+Lint/NoReturnInBeginEndBlocks:
+  Enabled: false
+Lint/NumberConversion:
+  Enabled: false
+Lint/NonAtomicFileOperation:
+  Enabled: false
+Lint/ShadowedArgument:
+  Enabled: false
+Lint/ShadowingOuterLocalVariable:
+  Enabled: false
+Lint/SymbolConversion:
+  Enabled: false
+Lint/UnusedBlockArgument:
+  Enabled: false
+Lint/UnusedMethodArgument:
+  Enabled: false
+Lint/MissingSuper:
+  Exclude:
+    - 'tests/**/*'
+Lint/ShadowedException:
+  Exclude:
+    - 'tests/**/*'
+Lint/UselessAssignment:
+  Enabled: true
+Lint/Debugger:
+  Enabled: true
+Lint/DuplicateMethods:
+  Enabled: true
+Lint/EmptyWhen:
+  Enabled: true
+Lint/SuppressedException:
+  Enabled: true
+
+# ── Security ─────────────────────────────────────────────────────────
+Security/Open:
+  Enabled: true
+Security/Eval:
+  Enabled: true
+
+# ── Gemspec ─────────────────────────────────────────────────────────
+Gemspec/RequireMFA:
+  Enabled: false
+Gemspec/DevelopmentDependencies:
+  Enabled: false
