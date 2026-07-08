@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../test_helper"
-require_relative "../../src/concurrent/thread_tracking"
+require_relative "../../src/s3_client"
 
 class S3ThreadTrackingTest < Minitest::Test
   class TrackingHost
@@ -20,6 +20,7 @@ class S3ThreadTrackingTest < Minitest::Test
     def log_info(*); end
     def log_warn(*); end
     def log_error(*); end
+
     def now_iso
       "2026-01-01T00:00:00Z"
     end

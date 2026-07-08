@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../test_helper"
-require_relative "../../src/states/upload_state"
+require_relative "../../src/s3_client"
 
 class UploadStateUnitTest < Minitest::Test
   def test_creation_with_hash_parts
