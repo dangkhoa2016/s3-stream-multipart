@@ -1,0 +1,49 @@
+
+temp
+sample-files
+
+# Test temp directories
+tests/tmp/
+*.upload.json
+*.state.json
+.smoke_store/
+.mem_store/
+.mem_tmp/
+.state_store/
+.state_tmp/
+.race_store/
+.race_tmp/
+.upload_store/
+.upload_tmp/
+.features_store/
+.features_tmp/
+.test_store/
+coverage
+manually/*.log
+
+# Logs
+*.log
+
+# Partial downloads
+*.part
+
+# Temp files
+*.tmp
+*.bak
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.iml
+
+# Bundler
+vendor/
+.bundle/
+
+# Qoder
+.qoder/
