@@ -1,0 +1,25 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Run tests
+        run: bundle exec rake test
+      - name: Publish to RubyGems
+        run: |
+          mkdir -p $HOME/.gem
+          echo "${{ secrets.GEM_CREDENTIALS }}" > $HOME/.gem/credentials
+          chmod 600 $HOME/.gem/credentials
+          gem build s3-stream-multipart.gemspec
+          gem push s3-stream-multipart-*.gem
