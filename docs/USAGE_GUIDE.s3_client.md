@@ -1,5 +1,7 @@
 # S3Client - Detailed Usage Guide
 
+> 🌐 Language / Ngôn ngữ: **English** | [Tiếng Việt](USAGE_GUIDE.s3_client.vi.md)
+
 A pure Ruby library (no AWS SDK dependency) for uploading/downloading large files to S3-compatible storage (AWS S3, MinIO, Cloudflare R2, Backblaze B2, …) with the following features:
 
 - **Memory-efficient** — streaming upload/download, never loads the whole file into RAM
