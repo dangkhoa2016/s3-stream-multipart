@@ -41,14 +41,14 @@ Gem::Specification.new do |s|
   s.add_dependency "aws-sigv4", "~> 1.0"
   s.add_dependency "rexml", "~> 3.0"
 
-  s.add_development_dependency "minitest", "~> 5.0"
+  s.add_development_dependency "minitest", "~> 6.0"
   s.add_development_dependency "rake", "~> 13.0"
   s.add_development_dependency "rbs", ">= 3.0"
   s.add_development_dependency "rubocop", "~> 1.50"
   s.add_development_dependency "rubocop-minitest", "~> 0.30"
   s.add_development_dependency "simplecov", "~> 0.22"
   s.add_development_dependency "simplecov-console", "~> 0.9"
-  s.add_development_dependency "steep", "~> 1.10"
+  s.add_development_dependency "steep", "~> 2.0"
   s.add_development_dependency "webrick", "~> 1.8"
   s.add_development_dependency "yard", "~> 0.9"
 end
