@@ -13,11 +13,13 @@ task :coverage do
   require "simplecov"
   SimpleCov.coverage_dir "coverage"
   results = SimpleCov::ResultMerger.merged_result
+  if results.nil?
+    puts "No coverage results available yet. Run `rake test` first."
+    next
+  end
   percent = results.covered_percent
   puts "Coverage: #{percent.round(4)}%"
   raise "Coverage #{percent}% < 99%" if percent < 99
-rescue SimpleCov::MergedResultNotAvailable
-  puts "No coverage results available yet. Run `rake test` first."
 end
 
 namespace :test do
@@ -50,7 +52,7 @@ namespace :test do
   desc "Run quick tests (both suites, exclude memory/race)"
   Rake::TestTask.new(:quick) do |t|
     t.libs << "tests"
-    t.test_files = FileList["tests/s3_client/test_*.rb", "tests/s3_multi_bucket_client/test_*.rb"].exclude(
+    t.test_files = FileList["tests/unit/**/test_*.rb", "tests/s3_client/test_*.rb", "tests/s3_multi_bucket_client/test_*.rb"].exclude(
       "**/test_memory.rb", "**/test_race.rb"
     )
   end
