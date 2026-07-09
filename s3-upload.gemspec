@@ -48,7 +48,7 @@ Gem::Specification.new do |s|
   s.add_development_dependency "rubocop-minitest", "~> 0.30"
   s.add_development_dependency "simplecov", "~> 0.22"
   s.add_development_dependency "simplecov-console", "~> 0.9"
-  s.add_development_dependency "steep", "~> 1.10"
+  s.add_development_dependency "steep", "~> 2.0"
   s.add_development_dependency "webrick", "~> 1.8"
   s.add_development_dependency "yard", "~> 0.9"
 end
