@@ -1,0 +1,460 @@
+# sig/s3-stream-multipart.rbs
+# RBS type signatures for s3-stream-multipart public API.
+
+# ── Modules mixed into S3BaseClient ──
+
+module HttpSigner
+  def sign_request!: (untyped request, String method, untyped uri, untyped body) -> void
+  def apply_signer_headers!: (untyped request, String method, untyped uri, untyped body) -> void
+  def build_http_request: (Symbol method, untyped uri, (String | IO)? body, ?Hash[String, String] headers, ?stream: bool) -> untyped
+end
+
+module Validator
+  def validate_credentials!: (String? ak, String? sk, ?access_key_name: String?, ?secret_key_name: String?) -> void
+  def validate_bucket!: (String name) -> void
+  def validate_key!: (String key) -> void
+end
+
+# ── Modules mixed into S3Client ──
+
+module S3EventRegistry
+end
+
+module S3UploadLogic
+end
+
+module S3DownloadLogic
+end
+
+# ── Modules mixed into S3MultiBucketClient ──
+
+module S3RetryHelper
+end
+
+module S3Errors
+  S3Error: untyped
+  UploadError: untyped
+  ResumableUploadError: untyped
+  DownloadError: untyped
+  S3StateError: untyped
+end
+
+module S3Constants
+  MIN_PART_SIZE: Integer
+  MAX_PART_SIZE: Integer
+  MAX_PARTS: Integer
+  DEFAULT_MAX_THREADS: Integer
+  DEFAULT_MAX_RETRIES: Integer
+  DEFAULT_RETRY_DELAY: Float
+  READ_CHUNK_BYTES: Integer
+  LOG_COLORS: Hash[String, String]
+  LOG_COLOR_RESET: String
+  LOG_COLOR_GREEN: String
+  LOG_COLOR_DIM: String
+  LOG_KEYWORD_REGEX: Regexp
+  STREAM_SINGLE_PUT_THRESHOLD: Integer
+  MAXIMUM_CONCURRENCY: Integer
+  DEFAULT_SSL_VERIFY_MODE: Integer
+  MAX_RETRY_DELAY: Float
+  PARALLEL_SAVE_FREQUENCY: Integer
+end
+
+module S3Utils
+  include S3Constants
+  include S3Errors
+
+  def backoff_with_jitter: (Integer attempt) -> Float
+  def sse_headers: () -> Hash[String, String]
+  def etag_matches_file?: (String? etag, String path) -> bool
+  def human_readable_size: (Integer? bytes) -> String
+  def now_mono: () -> Float
+  def now_iso: () -> String
+  def format_elapsed: (Float seconds) -> String
+  def format_throughput: (Float mbps) -> String
+  def format_progress: (Float elapsed, Float throughput) -> String
+  def transient_errors: () -> Array[untyped]
+  def check_response!: (untyped response, ?context: String) -> void
+  def retry_with_backoff: (max_retries: Integer, context: String, ?backoff_base: Float?, ?client: untyped?, ?on_retry: Proc?) { () -> untyped } -> untyped
+  def extract_metadata_from_headers: (untyped resp) -> Hash[String, String]
+end
+
+module S3DownloadHelpers
+  include S3Constants
+  include S3Errors
+
+  PartPaths: Struct[untyped]  # keyword_init: true
+
+  def compute_download_paths: (String local_path, String destination_path, ?resume: bool) -> untyped
+  def _resolve_download_path: (String local_path, String? destination_path) -> String
+  def rename_part_to_final: (String part_path, String final_path) -> void
+  def build_download_file_result: (String key, String? bucket, String local_path, Integer size, ?bool resumed, elapsed: Float) -> untyped
+
+  def resume_start_byte: (String local_path) -> Integer
+  def build_resume_headers: (Integer start_byte) -> Hash[String, String]
+  def parse_content_range: (untyped resp) -> Integer?
+  def load_download_state: (String? state_file, key: String, part_size: Integer, total_size: Integer) -> untyped?
+  def setup_download_state: (String? state_file, key: String, total_size: Integer, part_size: Integer, local_path: String, bucket: String?) -> untyped
+  def build_part_downloader: (untyped client, untyped state, ?output_file: untyped, max_threads: Integer, max_retries: Integer, retry_delay: Float, ?state_file: String?) -> untyped
+  def run_parallel_download: (String key, ?bucket: String?, total_size: Integer, part_size: Integer, local_path: String, max_threads: Integer, max_retries: Integer, retry_delay: Float, ?on_progress: Proc?, ?progress_callback: Proc?, ?state_file: String?) -> untyped
+  def stream_write_chunks: (untyped resp, String part_path, String mode, Integer start_byte, Proc? on_progress) -> Integer
+  def stream_single_bucket_download: (String key, untyped paths, Proc? on_progress) -> Integer
+  def stream_multi_bucket_download: (String key, String? bucket, untyped paths, Proc? on_progress) -> Integer
+  def download_stream: (String key, ?bucket: String?, ?range: (Range[Integer] | Array[Integer])?, ?on_progress: Proc?, ?progress_callback: Proc?) -> String
+  def _stream_download: (String key, ?bucket: String?, headers: Hash[String, String]) { (String chunk) -> void } -> Integer
+  def _format_download_result: (String key, String? bucket, String local_path, Integer size, ?bool resumed, elapsed: Float, throughput: Float) -> untyped
+end
+
+class S3BaseClient
+  class S3Error < StandardError
+    attr_reader code: String?
+    attr_reader request_id: String?
+    def initialize: (String? code, String message, ?String? request_id, ?String? body) -> void
+  end
+
+  class UploadError < StandardError
+  end
+
+  class ResumableUploadError < UploadError
+  end
+
+  class DownloadError < StandardError
+  end
+
+  class S3StateError < StandardError
+  end
+
+  class UploadResult < Data
+    attr_reader key: String
+    attr_reader size: Integer
+    attr_reader etag: String
+    attr_reader elapsed: Float
+    attr_reader throughput: Float
+    attr_reader extra: Hash[Symbol, untyped]
+    def initialize: (key: String, size: Integer, etag: String, elapsed: Float, throughput: Float, extra: Hash[Symbol, untyped]) -> void
+    def to_h: () -> Hash[Symbol, untyped]
+    def []: (Symbol key) -> untyped
+  end
+
+  class DownloadResult < Data
+    attr_reader path: String?
+    attr_reader size: Integer?
+    attr_reader elapsed: Float?
+    attr_reader throughput: Float?
+    attr_reader extra: Hash[Symbol, untyped]?
+    def initialize: (path: String?, size: Integer?, elapsed: Float?, throughput: Float?, extra: Hash[Symbol, untyped]?) -> void
+    def to_h: () -> Hash[Symbol, untyped]
+    def []: (Symbol key) -> untyped
+  end
+
+  include S3Utils
+  include S3DownloadHelpers
+  include S3Logging
+  include HttpSigner
+  extend Validator
+
+  DEPRECATED_OPTS: Hash[Symbol, Symbol]
+
+  def single_bucket?: () -> bool
+  def normalize_deprecated_opts: (Hash[untyped, untyped] opts) -> Hash[untyped, untyped]
+  def resolve_style: (Symbol style, String? endpoint) -> Symbol
+  def build_endpoint: (String? endpoint, String region, String bucket, Symbol style) -> String
+  def _assign_shared_opts: (region: String, session_token: String?, open_timeout: Integer, read_timeout: Integer, debug: bool, sse: untyped?, max_retries: Integer, retry_delay: Float, max_concurrency: Integer?, logger: untyped, log_file: String?, log_color: bool, log_format: Symbol) -> void
+  def _init_shared: (region: String, session_token: String?, access_key_id: String?, secret_access_key: String?) -> void
+  def _http_start: (untyped uri) { (untyped http) -> untyped } -> untyped
+  def http_start: (untyped uri) { (untyped http) -> untyped } -> untyped
+  def ensure_success!: (untyped resp) -> void
+  def execute_with_retry: (String label, untyped uri, max_attempts: Integer) { () -> untyped } -> untyped
+  def encode_path: (String path) -> String
+  def encode_query: (Hash[String, String] query) -> String
+  def log_request_details: (untyped method, untyped uri, Integer body_size) -> void
+  def resolve_bucket: (?String? bucket) -> String?
+
+  def head_object: (key: String, ?bucket: String?) -> Hash[Symbol, untyped]
+  def delete_object: (key: String, ?bucket: String?) -> Hash[Symbol, untyped]
+  def presigned_url: (key: String, ?method: Symbol, ?expires_in: Integer, ?bucket: String?, ?query: Hash[String, String]?) -> String
+  def list_multipart_uploads: (?prefix: String?, ?max_uploads: Integer, ?bucket: String?) -> Array[Hash[Symbol, untyped]]
+  def list_parts: (key: String, upload_id: String, ?max_parts: Integer, ?bucket: String?) -> Array[Hash[Symbol, untyped]]
+  def abort_multipart_upload: (key: String, upload_id: String, ?bucket: String?) -> Hash[Symbol, untyped]
+  def create_multipart_upload: (key: String, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?, ?bucket: String?) -> String
+  def complete_multipart_upload: (key: String, upload_id: String, parts: Array[Hash[Symbol, untyped]], ?bucket: String?) -> String?
+  def check_skip_existing: (key: String, file_path: String, file_size: Integer, ?bucket: String?) -> (Hash[Symbol, untyped] | nil)
+  def safe_abort: (key: String, upload_id: String, ?bucket: String?) -> void
+
+  def compute_upload_session_metadata: (String path, Integer size) -> Hash[Symbol, untyped]
+
+  def validate_bucket!: (String name) -> void
+  def validate_key!: (String key) -> void
+  def validate_credentials!: (String? ak, String? sk, ?access_key_name: String?, ?secret_key_name: String?) -> void
+
+  def emit_event: (Symbol event, *untyped args) -> void
+
+  class EmptyUpload
+    def initialize: (client: untyped, ?logger: untyped) -> void
+    def call: (key: String, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?, ?on_progress: ^(Integer, Integer) -> void?, ?t0: Float?, ?state_file: String?, ?bucket: String?) -> UploadResult
+  end
+
+  class SinglePartUpload
+    def initialize: (client: untyped, ?logger: untyped) -> void
+    def call: (key: String, local_path: String, size: Integer, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?, ?on_progress: ^(Integer, Integer) -> void?, ?t0: Float?, ?state_file: String?, ?bucket: String?) -> UploadResult
+  end
+
+  class MultipartUpload
+    def initialize: (client: untyped, ?logger: untyped) -> void
+    def call: (local_path: String, key: String, part_size: Integer, size: Integer, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?, ?on_progress: ^(Integer, Integer) -> void?, ?state_file: String?, ?t0: Float?, ?max_concurrency: Integer?, ?max_retries: Integer?, ?retry_delay: Float?, ?bucket: String?) -> UploadResult
+  end
+
+  class ResumeUpload
+    def initialize: (client: untyped, ?logger: untyped) -> void
+    def call: (state_file: String, ?key: String?, ?on_progress: ^(Integer, Integer) -> void?, ?bucket: String?, ?local_path: String?) -> UploadResult
+  end
+
+  class UploadService
+    def initialize: (client: untyped, ?logger: untyped) -> void
+    def call: (key: String, local_path: String, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?, ?part_size: Integer?, ?size: Integer?, ?on_progress: ^(Integer, Integer) -> void?, ?state_file: String?, ?t0: Float?, ?max_threads: Integer?, ?max_retries: Integer?, ?retry_delay: Float?, ?bucket: String?, ?skip_existing: bool?) -> UploadResult
+  end
+
+  class DownloadService
+    def initialize: (client: untyped, ?logger: untyped?) -> void
+    def call: (key: String, ?destination_path: String?, ?local_path: String?, ?range: (Range[Integer] | Array[Integer])?, ?on_progress: ^(Integer, Integer) -> void?, ?bucket: String?) -> DownloadResult
+  end
+
+  class SinglePartDownload
+    def initialize: (client: untyped, ?logger: untyped?) -> void
+    def call: (key: String, destination_path: String, ?range: (Range[Integer] | Array[Integer])?, ?on_progress: ^(Integer, Integer) -> void?, ?bucket: String?) -> DownloadResult
+  end
+end
+
+class S3Client < S3BaseClient
+  DEFAULT_PART_SIZE:    Integer  # 10 MB
+  DEFAULT_CONCURRENCY:  Integer
+  DEFAULT_RETRIES:      Integer
+  RETRY_BACKOFF_BASE_S: Float
+
+  attr_reader region:          String
+  attr_reader bucket:          String
+  attr_reader endpoint:        String
+  attr_reader part_size:       Integer
+  attr_reader max_concurrency: Integer
+  attr_reader max_retries:     Integer
+  attr_reader open_timeout:    Integer
+  attr_reader read_timeout:    Integer
+  attr_reader signer:          untyped
+
+  def initialize: (region: String, bucket: String, **untyped opts) -> void
+
+  def build_uri: (String key, ?method: Symbol, ?query: Hash[String, String]?, ?bucket: String?) -> untyped
+  def perform_request: (Symbol method, String key, ?headers: Hash[String, String], ?body: (String | IO)?, ?streaming: bool, ?bucket: String?) { (untyped resp) -> untyped } -> untyped
+
+  def upload_file: (key: String, ?local_path: String?, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?, ?part_size: Integer?, ?on_progress: ^(Integer, Integer) -> void?, ?state_file: String?, ?skip_existing: bool) -> S3BaseClient::UploadResult
+
+  def resume_upload: (state_file: String, ?on_progress: ^(Integer, Integer) -> void?, ?local_path: String?) -> S3BaseClient::UploadResult
+
+  def multipart_start: (key: String, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?) -> String
+  def multipart_upload_part: (key: String, upload_id: String, part_number: Integer, body: (String | IO), ?length: Integer?, ?io_offset: Integer) -> String
+  def multipart_complete: (key: String, upload_id: String, parts: Array[Hash[Symbol, untyped]]) -> untyped
+  def multipart_abort: (key: String, upload_id: String) -> void
+
+  def download_file: (key: String, ?local_path: String?, ?destination_path: String?, ?range: (Range[Integer] | Array[Integer])?, ?on_progress: ^(Integer, Integer) -> void?, ?bucket: String?) -> S3BaseClient::DownloadResult
+  def download_stream: (key: String, ?range: (Range[Integer] | Array[Integer])?) -> String
+
+  def upload_directory: (directory: String, ?prefix: String, ?pattern: String, ?exclude: Array[String], ?max_files: Integer, ?multipart_threshold: Integer, ?on_file_start: Proc?, ?on_file_complete: Proc?, ?on_file_error: Proc?, ?content_type: String?, ?metadata: Hash[String, String], ?cache_control: String?, ?skip_existing: bool, ?state_dir: String?) -> Array[Hash[Symbol, untyped]]
+
+  def _extract_credentials!: (Hash[untyped, untyped] opts) -> [String?, String?]
+  def _extract_part_size!: (Hash[untyped, untyped] opts) -> Integer
+
+  def self.build: (region: String, ?bucket: String?, ?endpoint: String?, ?access_key_id: String?, ?secret_access_key: String?, ?session_token: String?, ?logger: untyped, ?debug: bool, **untyped) -> (S3Client | S3MultiBucketClient)
+
+  include S3UploadLogic
+  include S3DownloadLogic
+  include RequestExecutor
+  extend S3EventRegistry
+end
+
+class S3MultiBucketClient < S3BaseClient
+  DEFAULT_PART_SIZE:    Integer  # 8 MB
+  DOWNLOAD_CHUNK_SIZE:  Integer
+
+  RangeSpec: Struct[untyped]
+
+  attr_reader endpoint:          String
+  attr_reader region:            String
+  attr_reader access_key_id:     String
+  attr_reader secret_access_key: String
+  attr_reader session_token:     String?
+  attr_reader logger:            untyped
+  attr_reader signer:            untyped
+
+  def initialize: (?bucket: String?, ?endpoint: String?, ?region: String?, ?access_key_id: String?, ?secret_access_key: String?, ?session_token: String?, ?part_size: Integer, ?endpoint_style: Symbol, ?open_timeout: Integer, ?read_timeout: Integer, ?logger: untyped, ?log_file: String?, ?debug: bool, ?sse: Hash[Symbol, untyped]?, ?max_retries: Integer, ?retry_delay: Float, ?max_concurrency: Integer?, ?log_color: bool, ?log_format: Symbol, **untyped opts) -> void
+
+  def build_uri: (String bucket, String key, ?Hash[String, String]? query_params) -> untyped
+  def signed_request: (Symbol method, untyped uri, ?body: (String | IO), ?body_stream: (String | IO)?, ?headers: Hash[String, String], ?streaming: bool) -> untyped
+  def make_http_request: (untyped uri) { (untyped http) -> untyped } -> untyped
+
+  def upload_file: (key: String, ?bucket: String?, ?local_path: String?, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?, ?skip_existing: bool) -> S3BaseClient::UploadResult
+
+  def resume_upload: (key: String, state_file: String, ?bucket: String?, ?local_path: String?, ?on_progress: ^(Integer, Integer) -> void?) -> S3BaseClient::UploadResult
+
+  def multipart_start: (bucket: String?, key: String, ?content_type: String, ?metadata: Hash[String, String], ?cache_control: String?) -> String
+  def multipart_upload_part: (bucket: String?, key: String, upload_id: String, part_number: Integer, body: (String | IO), ?length: Integer?, ?io_offset: Integer) -> String
+  def multipart_complete: (bucket: String?, key: String, upload_id: String, parts: Array[Hash[Symbol, untyped]]) -> untyped
+  def multipart_abort: (bucket: String?, key: String, upload_id: String) -> void
+
+  def download_file: (key: String, ?bucket: String?, ?destination_path: String?, ?local_path: String?, ?chunk_size: Integer, ?on_progress: ^(Integer, Integer) -> void?, ?resume: bool, ?range: (Range[Integer] | Array[Integer])?) -> S3BaseClient::DownloadResult
+  def download_stream: (key: String, ?bucket: String?, ?range: (Range[Integer] | Array[Integer])?) { (?String chunk) -> void } -> String?
+
+  def upload_directory: (bucket: String?, directory: String, ?prefix: String, ?pattern: String, ?exclude: Array[String], ?max_files: Integer, ?multipart_threshold: Integer, ?on_file_start: Proc?, ?on_file_complete: Proc?, ?on_file_error: Proc?, ?content_type: String?, ?metadata: Hash[String, String], ?cache_control: String?, ?skip_existing: bool, ?state_dir: String?) -> Array[Hash[Symbol, untyped]]
+end
+
+module S3ThreadPool
+  def create_thread_pool: (Integer concurrency, Array[Integer] pending_parts) { (Integer part_number, Integer tid, untyped http) -> untyped } -> Array[Thread]
+  def join_threads: (Array[Thread] thread_pool) { () -> void } -> void
+  def open_http_connection_for_thread: (Integer tid) -> untyped?
+  def build_sample_uri: () -> untyped
+  def mark_part_done: (Integer part_num, Integer tid, Integer parts_done_count) -> void
+end
+
+class PartUploader
+  def initialize: (untyped client, UploadState upload_state, ?max_threads: Integer?, max_retries: Integer, retry_delay: Float, ?on_progress: ^(Integer, Integer) -> void?, ?state_file: String?, ?state_save_frequency: Integer) -> void
+  def upload_all!: () -> Array[Hash[Symbol, untyped]]
+end
+
+class PartDownloader
+  def initialize: (untyped client, DownloadState download_state, ?output_file: untyped, max_threads: Integer, max_retries: Integer, retry_delay: Float, ?state_file: String?) -> void
+  def download_all!: () -> void
+end
+
+class S3ParallelTransfer
+  def initialize: (untyped client, untyped state, ?max_threads: Integer?, ?progress_callback: Proc?, ?state_file: String?, ?state_save_frequency: Integer?) -> void
+  def transfer_all!: () -> untyped
+end
+
+class S3ParallelUploader < S3ParallelTransfer
+  def initialize: (untyped client, UploadState upload_state, ?max_threads: Integer?, ?progress_callback: Proc?, ?state_file: String?, ?state_save_frequency: Integer?) -> void
+  def upload_all!: () -> Array[String]
+end
+
+class S3ParallelDownloader < S3ParallelTransfer
+  def initialize: (untyped client, DownloadState download_state, ?output_file: untyped?, ?max_threads: Integer?, ?progress_callback: Proc?, ?state_file: String?) -> void
+  def download_all!: () -> void
+end
+
+class UploadStateManager
+  def initialize: (untyped client) -> void
+  def load_state: (String path) -> untyped
+  def parse_state_data: (String path) -> untyped
+  def save_state: (String path, untyped state, ?tmp_path: String?) -> void
+  def atomic_write_state: (String path, String payload, Integer new_count, String tmp_path) -> void
+  def validate_state: (untyped state, key: String, part_size: Integer, total_size: Integer, local_path: String) -> bool
+  def state_mismatched?: (untyped state, String key, Integer part_size, Integer total_size, String local_path) -> bool
+  def file_changed?: (untyped state, String local_path) -> bool
+  def cleanup_state: (String path) -> void
+end
+
+class UploadState
+  attr_reader parts: Hash[Integer, String]
+  attr_reader part_size: Integer
+  attr_reader total_size: Integer
+  attr_reader local_path: String
+  attr_reader key: String
+  attr_reader upload_id: String
+  attr_reader upload_session_id: String
+  attr_reader completed: bool
+  attr_reader file_fingerprint: String?
+  attr_reader resume_count: Integer
+  attr_reader resumed_at: String?
+
+  def initialize: (untyped data) -> void
+  def completed_parts_count: () -> Integer
+  def total_parts: () -> Integer
+  def pending_list: () -> Array[Integer]
+  def progress_percentage: () -> Float
+  def e_tag_list: () -> Array[String]
+  def save_to_file: (String path) -> void
+  def self.from_file: (String path) -> UploadState
+end
+
+class DownloadState
+  attr_reader parts: Hash[Integer, String]
+  attr_reader part_size: Integer
+  attr_reader total_size: Integer
+  attr_reader local_path: String
+  attr_reader key: String
+  attr_reader resume_count: Integer
+  attr_reader resumed_at: String?
+
+  def initialize: (untyped data) -> void
+  def completed_parts_count: () -> Integer
+  def total_parts: () -> Integer
+  def pending_list: () -> Array[Integer]
+  def progress_percentage: () -> Float
+  def save_to_file: (String path) -> void
+  def self.from_file: (String path) -> DownloadState
+end
+
+class S3BulkUploader
+  DEFAULT_PATTERN:            String   # **/*
+  DEFAULT_MAX_FILES:          Integer  # 4
+  DEFAULT_MULTIPART_THRESHOLD: Integer # 100 MB
+
+  def initialize: (client: (S3Client | S3MultiBucketClient), directory: String, ?prefix: String, ?bucket: String?, ?pattern: String, ?exclude: Array[String], ?max_files: Integer, ?multipart_threshold: Integer, ?on_file_start: Proc?, ?on_file_complete: Proc?, ?on_file_error: Proc?, ?content_type: String?, ?metadata: Hash[String, String], ?cache_control: String?, ?skip_existing: bool, ?state_dir: String?, ?client_factory: Proc?) -> void
+  def run!: () -> Hash[Symbol, untyped]
+end
+
+class DirectoryScanner
+  DEFAULT_PATTERN: String
+
+  def initialize: (String directory, ?prefix: String, ?pattern: String, ?exclude: Array[String]) -> void
+  def scan: () -> Array[Hash[Symbol, untyped]]
+  def deduplicate: (Array[String] files) -> Array[Hash[Symbol, untyped]]
+  def detect_content_type: (String path) -> String
+end
+
+class BulkUploadWorker
+  def initialize: (client: (S3Client | S3MultiBucketClient), ?bucket: String?, ?multipart_threshold: Integer, ?content_type: String?, ?metadata: Hash[String, String], ?cache_control: String?, ?state_dir: String?, ?skip_existing: bool) -> void
+  def upload: (String file, ?thread_client: (S3Client | S3MultiBucketClient)?) -> Hash[Symbol, untyped]
+  def skip_check: (String file, ?thread_client: (S3Client | S3MultiBucketClient)?) -> bool
+end
+
+# Logging module mixed into S3BaseClient.
+module S3Logging
+  def setup_logger: (untyped logger, ?log_file: String?, ?debug: bool, ?log_color: bool, ?log_format: Symbol) -> void
+  def log_info: (String msg) -> void
+  def log_debug: (String msg) -> void
+  def log_warn: (String msg) -> void
+  def log_error: (String msg) -> void
+end
+
+# Thread tracking for concurrent operations.
+module S3ThreadTracking
+  ThreadState: Struct[untyped]
+  def init_thread_tracking: (?Integer? max_threads) -> void
+  def track_thread: (untyped state, String label) -> void
+  def mark_thread_done: (Integer tid) -> void
+  def active_threads: () -> Integer
+  def thread_states: () -> Hash[Integer, untyped]
+end
+
+# Progress tracking for parallel download/upload.
+module S3ProgressTracker
+  def global_throughput: () -> Float
+  def eta_seconds: () -> Float
+  def progress_pct: () -> Float
+end
+
+# Part geometry calculator.
+module S3PartGeometry
+  def calculate_part_offset_and_length: (Integer part_number, Integer size, Integer part_size) -> [Integer, Integer]
+end
+
+# Request execution with retry.
+module RequestExecutor
+  def retry_with_backoff: (?max_retries: Integer?, ?backoff_base: Float?, ?backoff_max: Float?, ?client: untyped?, ?context: String?) { () -> untyped } -> untyped
+end
+
+module S3Helper
+  def self?.upload: (client: (S3Client | S3MultiBucketClient), key: String, ?local_path: String?, ?file_path: String?, ?bucket: String?, ?multipart_threshold: Integer, **untyped) -> S3BaseClient::UploadResult
+
+  def self?.download: (client: (S3Client | S3MultiBucketClient), key: String, ?local_path: String?, ?destination: String?, ?bucket: String?, **untyped) -> S3BaseClient::DownloadResult
+
+  def self?.upload_bulk: (client: (S3Client | S3MultiBucketClient), directory: String, ?prefix: String, ?bucket: String?, ?concurrency: Integer, ?skip_existing: bool, ?dry_run: bool, ?on_progress: Proc?, ?progress_callback: Proc?, ?recursive: bool, ?filter: String?) -> Hash[Symbol, untyped]
+end
