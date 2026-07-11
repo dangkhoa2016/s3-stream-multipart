@@ -1,0 +1,346 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require_relative "../src/s3_client"
+require_relative "../src/s3_multi_bucket_client"
+
+module S3SM
+  class CLI
+    COMMANDS = %w[upload download presign delete list list-parts list-uploads upload-dir].freeze
+
+    def run(args)
+      global, command, command_args = parse(args)
+      return print_help if global[:help]
+
+      client = build_client(global)
+      send("cmd_#{command.tr('-', '_')}", client, command_args)
+    rescue KeyError
+      abort "Unknown command: #{command}. Run `s3sm --help` for usage."
+    rescue OptionParser::MissingArgument, OptionParser::InvalidOption => e
+      abort "Error: #{e.message}"
+    end
+
+    private
+
+    def parse(args)
+      global = {}
+      opts = OptionParser.new do |o|
+        o.banner = "Usage: s3sm [options] <command> [command-options]"
+        o.separator ""
+        o.separator "Global options:"
+        o.on("--endpoint URL", "S3-compatible endpoint (e.g., https://minio.local:9000)") { |v| global[:endpoint] = v }
+        o.on("--region REGION", "AWS region (default: us-east-1)") { |v| global[:region] = v }
+        o.on("--bucket BUCKET", "Default bucket name") { |v| global[:bucket] = v }
+        o.on("--access-key KEY", "Access key ID (env: AWS_ACCESS_KEY_ID)") { |v| global[:'access-key'] = v }
+        o.on("--secret-key KEY", "Secret access key (env: AWS_SECRET_ACCESS_KEY)") { |v| global[:'secret-key'] = v }
+        o.on("--endpoint-style STYLE", %w[path virtual-hosted], "Endpoint style: path or virtual-hosted (env: AWS_ENDPOINT_STYLE)") { |v| global[:'endpoint-style'] = v }
+        o.on("--signature-version VERSION", %w[v2 v4], "SigV2 or SigV4 signing (default: v4, env: AWS_SIGNATURE_VERSION)") { |v| global[:'signature-version'] = v }
+        o.on("--debug", "Enable debug logging") { global[:debug] = true }
+        o.separator ""
+        o.separator "Commands:"
+        o.separator "    upload      Upload a file"
+        o.separator "    download    Download a file"
+        o.separator "    presign     Generate a presigned URL"
+        o.separator "    delete      Delete an object"
+        o.separator "    list         List objects in a bucket"
+        o.separator "    list-parts  List parts of a multipart upload"
+        o.separator "    list-uploads List active multipart uploads"
+        o.separator "    upload-dir  Upload a directory"
+        o.separator ""
+        o.on("-h", "--help", "Show this help") { global[:help] = true }
+      end
+      rest = opts.permute!(args)
+      global[:help] ||= rest.empty?
+      command = rest.shift
+      [global, command, rest]
+    end
+
+    def build_client(global)
+      region  = global[:region]  || ENV.fetch("AWS_REGION", "us-east-1")
+      bucket  = global[:bucket]  || ENV.fetch("AWS_BUCKET", nil)
+      endpoint = global[:endpoint] || ENV.fetch("AWS_ENDPOINT", nil)
+      endpoint = "https://#{endpoint}" if endpoint && !endpoint.start_with?("http://", "https://")
+      ak      = global[:'access-key'] || ENV.fetch("AWS_ACCESS_KEY_ID", nil)
+      sk      = global[:'secret-key'] || ENV.fetch("AWS_SECRET_ACCESS_KEY", nil)
+      endpoint_style = (global[:'endpoint-style'] || ENV.fetch("AWS_ENDPOINT_STYLE", nil))&.to_sym
+      signature_version = (global[:'signature-version'] || ENV.fetch("AWS_SIGNATURE_VERSION", nil))&.to_sym || :v4
+
+      if endpoint
+        S3MultiBucketClient.new(
+          region: region, bucket: bucket, endpoint: endpoint,
+          access_key_id: ak, secret_access_key: sk,
+          debug: global[:debug],
+          signature_version: signature_version,
+          **(endpoint_style ? { endpoint_style: endpoint_style } : {})
+        )
+      else
+        S3Client.new(region: region, bucket: bucket,
+                     access_key_id: ak, secret_access_key: sk,
+                     debug: global[:debug],
+                     signature_version: signature_version)
+      end
+    rescue KeyError => e
+      abort "Missing required credential: #{e.message}"
+    end
+
+    def cmd_upload(client, args)
+      opts = parse_upload_opts(args)
+      abort "Usage: s3sm upload <local_path> --key KEY [--bucket BUCKET]" unless opts[:local_path] && opts[:key]
+
+      result = client.upload_file(**opts)
+      puts "Uploaded: #{result.key}"
+    end
+
+    def parse_upload_opts(args)
+      opts = { local_path: nil, file_path: nil, key: nil, bucket: nil,
+               content_type: "application/octet-stream", metadata: {},
+               cache_control: nil, skip_existing: false,
+               concurrency: nil, retries: nil }
+      OptionParser.new do |o|
+        o.banner = "Usage: s3sm upload <local_path> [options]"
+        o.on("--key KEY", "S3 object key (required)") { |v| opts[:key] = v }
+        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+        o.on("--content-type TYPE", "Content-Type header") { |v| opts[:content_type] = v }
+        o.on("--skip-existing", "Skip if object already exists") { opts[:skip_existing] = true }
+        o.on("--concurrency N", Integer, "Max concurrent threads") { |v| opts[:concurrency] = v }
+        o.on("--retries N", Integer, "Max retries per part") { |v| opts[:retries] = v }
+        o.on("--cache-control VAL", "Cache-Control header") { |v| opts[:cache_control] = v }
+      end.order!(args)
+
+      path = args.shift
+      if path
+        opts[:local_path] = path
+        opts[:file_path]  = path
+      end
+      opts[:metadata] = {} if opts[:metadata].nil?
+      opts.compact
+    end
+
+    def cmd_download(client, args)
+      opts = parse_download_opts(args)
+      abort "Usage: s3sm download <key> [local_path] --bucket BUCKET" unless opts[:key]
+
+      result = client.download_file(**opts)
+      puts "Downloaded to: #{result.local_path}"
+    end
+
+    def parse_download_opts(args)
+      opts = { key: nil, bucket: nil, destination_path: nil, local_path: nil,
+               resume: false }
+      OptionParser.new do |o|
+        o.banner = "Usage: s3sm download <key> [local_path] [options]"
+        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+        o.on("--resume", "Resume previous download") { opts[:resume] = true }
+      end.order!(args)
+
+      opts[:key] = args.shift
+      if (dest = args.shift)
+        opts[:destination_path] = dest
+        opts[:local_path]       = dest
+      end
+      opts.compact
+    end
+
+    def cmd_presign(client, args)
+      opts = parse_presign_opts(args)
+      abort "Usage: s3sm presign <key> [--bucket BUCKET]" unless opts[:key]
+
+      url = client.presigned_url(**opts)
+      puts url
+    end
+
+    def parse_presign_opts(args)
+      opts = { key: nil, bucket: nil, expires_in: 3600, method: :get }
+      OptionParser.new do |o|
+        o.banner = "Usage: s3sm presign <key> [options]"
+        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+        o.on("--expires SECONDS", Integer, "Expiration in seconds (default: 3600)") { |v| opts[:expires_in] = v }
+        o.on("--method METHOD", %w[get put delete head], "HTTP method (get/put/delete/head)") { |v| opts[:method] = v.to_sym }
+      end.order!(args)
+
+      opts[:key] = args.shift
+      opts.compact
+    end
+
+    def cmd_delete(client, args)
+      opts = parse_delete_opts(args)
+      abort "Usage: s3sm delete <key> [--bucket BUCKET]" unless opts[:key]
+
+      client.delete_object(**opts)
+      puts "Deleted: #{opts[:key]}"
+    end
+
+    def parse_delete_opts(args)
+      opts = { key: nil, bucket: nil }
+      OptionParser.new do |o|
+        o.banner = "Usage: s3sm delete <key> [options]"
+        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+      end.order!(args)
+
+      opts[:key] = args.shift
+      opts.compact
+    end
+
+    def cmd_list(client, args)
+      opts = parse_list_opts(args)
+
+      result = client.list_objects(**opts)
+      contents = result[:contents]
+      common_prefixes = result[:common_prefixes]
+
+      label = opts[:prefix] ? " (prefix: #{opts[:prefix]})" : ""
+      puts "Objects in #{opts[:bucket] || 'default bucket'}#{label}:"
+
+      if contents.empty? && common_prefixes.empty?
+        puts "  (empty)"
+        return
+      end
+
+      unless contents.empty?
+        puts "  %-60s %-12s %-30s %-16s %s" % ["Key", "Size", "LastModified", "StorageClass", "ETag"]
+        contents.each do |obj|
+          size_str = obj[:size] ? format_size(obj[:size]) : "0"
+          puts "  %-60s %-12s %-30s %-16s %s" % [
+            obj[:key], size_str, obj[:last_modified], obj[:storage_class], obj[:etag]
+          ]
+        end
+      end
+
+      if common_prefixes.any?
+        puts ""
+        puts "Common prefixes:"
+        common_prefixes.each { |p| puts "  #{p}" }
+      end
+
+      total_size = contents.sum { |o| o[:size] || 0 }
+      puts ""
+      puts "Total: #{contents.size} object#{"s" if contents.size != 1}, #{format_size(total_size)}"
+    end
+
+    def parse_list_opts(args)
+      opts = { bucket: nil, prefix: nil, delimiter: "/", max_keys: 100, paginate: true }
+      OptionParser.new do |o|
+        o.banner = "Usage: s3sm list [options]"
+        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+        o.on("--prefix PREFIX", "Filter by key prefix") { |v| opts[:prefix] = v }
+        o.on("--delimiter DELIM", "Delimiter (default: /)") { |v| opts[:delimiter] = v }
+        o.on("--max-keys N", Integer, "Max keys to list (default: 1000)") { |v| opts[:max_keys] = v }
+        o.on("--no-paginate", "Disable auto-pagination") { opts[:paginate] = false }
+      end.order!(args)
+
+      opts.compact
+    end
+
+    def cmd_list_parts(client, args)
+      opts = parse_list_parts_opts(args)
+      abort "Usage: s3sm list-parts <key> --upload-id ID [--bucket BUCKET]" unless opts[:key] && opts[:upload_id]
+
+      result = client.list_parts(**opts)
+      puts "Parts for #{opts[:key]} (upload: #{opts[:upload_id]}):"
+      (result[:parts] || []).each { |p| puts "  Part #{p[:part_number]}: ETag=#{p[:etag]} Size=#{p[:size]}" }
+    end
+
+    def parse_list_parts_opts(args)
+      opts = { key: nil, upload_id: nil, bucket: nil, max_parts: 100 }
+      OptionParser.new do |o|
+        o.banner = "Usage: s3sm list-parts <key> --upload-id ID [options]"
+        o.on("--upload-id ID", "Upload ID (required)") { |v| opts[:upload_id] = v }
+        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+        o.on("--max-parts N", Integer, "Max parts to list") { |v| opts[:max_parts] = v }
+      end.order!(args)
+
+      opts[:key] = args.shift
+      opts.compact
+    end
+
+    def cmd_list_uploads(client, args)
+      opts = parse_list_uploads_opts(args)
+
+      result = client.list_multipart_uploads(**opts)
+      uploads = result[:uploads] || []
+      puts "Multipart uploads#{" (prefix: #{opts[:prefix]})" if opts[:prefix]}:"
+      if uploads.empty?
+        puts "  (none)"
+      else
+        uploads.each { |u| puts "  #{u[:key]} — #{u[:upload_id]} — #{u[:initiated]}" }
+      end
+    end
+
+    def parse_list_uploads_opts(args)
+      opts = { bucket: nil, prefix: nil, max_uploads: 100 }
+      OptionParser.new do |o|
+        o.banner = "Usage: s3sm list-uploads [options]"
+        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+        o.on("--prefix PREFIX", "Filter by key prefix") { |v| opts[:prefix] = v }
+        o.on("--max-uploads N", Integer, "Max uploads to list") { |v| opts[:max_uploads] = v }
+      end.order!(args)
+
+      opts.compact
+    end
+
+    def cmd_upload_dir(client, args)
+      opts = parse_upload_dir_opts(args)
+      abort "Usage: s3sm upload-dir <directory> [--bucket BUCKET]" unless opts[:directory]
+
+      result = client.upload_directory(**opts)
+      puts "Uploaded #{result.size} files from #{opts[:directory]}"
+    end
+
+    def parse_upload_dir_opts(args)
+      opts = { directory: nil, bucket: nil, prefix: "", pattern: "**/*",
+               exclude: [], max_files: 4, skip_existing: false }
+      OptionParser.new do |o|
+        o.banner = "Usage: s3sm upload-dir <directory> [options]"
+        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+        o.on("--prefix PREFIX", "Key prefix for uploaded files") { |v| opts[:prefix] = v }
+        o.on("--pattern PAT", "File glob pattern (default: **/*)") { |v| opts[:pattern] = v }
+        o.on("--max-files N", Integer, "Max concurrent file uploads") { |v| opts[:max_files] = v }
+        o.on("--skip-existing", "Skip objects that already exist") { opts[:skip_existing] = true }
+      end.order!(args)
+
+      opts[:directory] = args.shift
+      opts.compact
+    end
+
+    def format_size(bytes)
+      return "0 B" if bytes.nil? || bytes.zero?
+      units = %w[B KB MB GB TB]
+      size = bytes.to_f
+      units.each_with_index do |unit, i|
+        return format("%.1f %s", size, unit) if size < 1024 || i == units.length - 1
+        size /= 1024
+      end
+    end
+
+    def print_help
+      puts <<~HELP
+        Usage: s3sm [global-options] <command> [command-options]
+
+        Global options:
+            --endpoint URL            S3-compatible endpoint URL
+            --region REGION           AWS region (default: us-east-1, env: AWS_REGION)
+            --bucket BUCKET           Default bucket (env: AWS_BUCKET)
+            --access-key KEY          Access key ID (env: AWS_ACCESS_KEY_ID)
+            --secret-key KEY          Secret access key (env: AWS_SECRET_ACCESS_KEY)
+            -h, --help                Show this help
+
+        Commands:
+            list                     List objects in a bucket
+            upload <path> --key KEY   Upload a file
+            download <key> [dest]     Download a file
+            presign <key>             Generate presigned URL
+            delete <key>              Delete an object
+            list-parts <key>          List multipart upload parts
+            list-uploads              List active multipart uploads
+            upload-dir <directory>    Upload a directory
+
+        Run: s3sm <command> --help for command-specific options.
+        Environment: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,
+                     AWS_BUCKET, AWS_ENDPOINT.
+      HELP
+    end
+  end
+end
+
+S3SM::CLI.new.run(ARGV)
