@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../test_helper"
-require_relative "../../src/states/upload_state"
+require_relative "../../src/s3_client"
 
 class UploadStateUnitTest < Minitest::Test
   def test_creation_with_hash_parts
@@ -229,5 +229,10 @@ class UploadStateUnitTest < Minitest::Test
       state.save_to_file(path)
       assert File.file?(path)
     end
+  end
+
+  def test_initialize_with_file_fingerprint
+    state = UploadState.new(file_fingerprint: "mtime-12345")
+    assert_equal "mtime-12345", state.file_fingerprint
   end
 end
