@@ -20,6 +20,7 @@ class S3ThreadTrackingTest < Minitest::Test
     def log_info(*); end
     def log_warn(*); end
     def log_error(*); end
+
     def now_iso
       "2026-01-01T00:00:00Z"
     end
