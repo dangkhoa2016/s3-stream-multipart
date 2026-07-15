@@ -73,20 +73,40 @@ module S3Logging
   def log_request_details(method, uri, body_size = 0)
     return unless @debug_mode
 
-    log_debug "[DETAILED REQUEST] #{method.upcase} #{uri}"
-    log_debug "  Body size: #{body_size} bytes"
+    m = method.to_s.upcase
+    host = uri.host || ""
+    path = uri.path.to_s
+    query = uri.query
+
+    log_debug "\e[36m\e[1m ┌─ REQUEST\e[0m"
+    log_debug "\e[36m │\e[0m \e[1m#{m}\e[0m \e[33m#{host}\e[0m#{path}#{"?\e[35m#{query}\e[0m" if query && !query.empty?}"
+    log_debug "\e[36m │\e[0m Body: \e[32m#{body_size} bytes\e[0m"
+    log_debug "\e[36m └─\e[0m"
   end
 
   def log_response_details(resp)
     return unless @debug_mode
 
-    log_debug "[DETAILED RESPONSE] #{resp.code} #{resp.message}"
-    resp.each_header { |k, v| log_debug "  Header: #{k}: #{v[0, 200]}" }
-    body = resp.body
-    return unless body && !body.empty?
+    code = resp.code.to_i
+    status_color = case code
+                   when 200..299 then "\e[32m"
+                   when 300..399 then "\e[33m"
+                   when 400..499 then "\e[31m"
+                   else "\e[31;1m"
+                   end
 
-    body_preview = body.bytesize > 1000 ? body[0, 1000] + "...[truncated #{body.bytesize} bytes]" : body
-    log_debug "  Body: #{body_preview.inspect}"
+    log_debug "\e[36m\e[1m ┌─ RESPONSE\e[0m"
+    log_debug "\e[36m │\e[0m Status: #{status_color}\e[1m#{resp.code}\e[0m \e[2m#{resp.message}\e[0m"
+    log_debug "\e[36m │\e[0m Headers:"
+    resp.each_header do |k, v|
+      log_debug "\e[36m │\e[0m   \e[36m#{k}\e[0m: \e[2m#{v[0, 120]}\e[0m"
+    end
+    body = resp.body
+    if body && !body.empty?
+      body_preview = body.bytesize > 500 ? "#{body[0, 500]}..." : body
+      log_debug "\e[36m │\e[0m Body: \e[2m#{body_preview[0, 200]}\e[0m"
+    end
+    log_debug "\e[36m └─\e[0m"
   end
 
   # Public accessors for logging — used by PartUploader.

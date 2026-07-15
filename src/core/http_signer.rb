@@ -63,11 +63,13 @@ module HttpSigner
     is_stream_body = !is_string_body && (body.respond_to?(:read) || stream)
 
     if @signature_version == :v2
-      _build_request_v2(req, method, uri, body, extra_headers, is_string_body: is_string_body,
-                        is_stream_body: is_stream_body, content_length: content_length)
+      _build_request_v2(req, method, uri, body, extra_headers,
+                        is_string_body: is_string_body, is_stream_body: is_stream_body,
+                        content_length: content_length)
     else
-      _build_request_v4(req, method, uri, body, extra_headers, is_string_body: is_string_body,
-                        is_stream_body: is_stream_body, content_length: content_length)
+      _build_request_v4(req, method, uri, body, extra_headers,
+                        is_string_body: is_string_body, is_stream_body: is_stream_body,
+                        content_length: content_length)
     end
     req
   end
@@ -97,12 +99,6 @@ module HttpSigner
     content_type_val = content_type ? content_type[1].to_s : ""
     md5 = ""
 
-    body_str = if is_string_body
-                 body
-               else
-                 ""
-               end
-
     resource = uri.path.empty? ? "/" : uri.path
 
     parts = [method.to_s.upcase, md5, content_type_val, date_str]
@@ -111,8 +107,8 @@ module HttpSigner
     string_to_sign = parts.join("\n")
 
     if @debug_mode
-      $stderr.puts "[SIGV2 DEBUG] string_to_sign=#{string_to_sign.inspect}"
-      $stderr.puts "[SIGV2 DEBUG] resource=#{resource}"
+      warn "\e[35m[SIGV2]\e[0m string_to_sign=\e[2m#{string_to_sign.inspect}\e[0m"
+      warn "\e[35m[SIGV2]\e[0m resource=\e[33m#{resource}\e[0m"
     end
 
     signature = Base64.strict_encode64(
@@ -122,7 +118,7 @@ module HttpSigner
     req["Authorization"] = "AWS #{@access_key_id}:#{signature}"
 
     if @debug_mode
-      $stderr.puts "[SIGV2 DEBUG] authorization=#{req["Authorization"]}"
+      warn "\e[35m[SIGV2]\e[0m auth=\e[36m#{req['Authorization']}\e[0m"
     end
 
     if is_string_body
@@ -167,10 +163,9 @@ module HttpSigner
     end
 
     if @debug_mode
-      $stderr.puts "[SIGV4 DEBUG] method=#{method.to_s.upcase}"
-      $stderr.puts "[SIGV4 DEBUG] url=#{uri.to_s}"
-      $stderr.puts "[SIGV4 DEBUG] sign_headers=#{sign_headers.inspect}"
-      $stderr.puts "[SIGV4 DEBUG] body_preview=#{sign_body.is_a?(String) ? sign_body[0..200].inspect : sign_body.inspect}"
+      warn "\e[35m[SIGV4]\e[0m method=\e[1m#{method.to_s.upcase}\e[0m url=\e[33m#{uri}\e[0m"
+      warn "\e[35m[SIGV4]\e[0m sign_headers=\e[2m#{sign_headers.inspect}\e[0m"
+      warn "\e[35m[SIGV4]\e[0m body=\e[2m#{sign_body.is_a?(String) ? sign_body[0..100].inspect : sign_body.inspect}\e[0m"
     end
 
     signed = @signer.sign_request(
@@ -181,7 +176,7 @@ module HttpSigner
     )
 
     if @debug_mode
-      $stderr.puts "[SIGV4 DEBUG] signed_headers=#{signed.headers.inspect}"
+      warn "\e[35m[SIGV4]\e[0m signed=\e[2m#{signed.headers.inspect}\e[0m"
     end
 
     sign_headers.each { |k, v| req[k] = v }
@@ -232,7 +227,6 @@ module HttpSigner
     end
 
     md5 = ""
-    body_str = body.respond_to?(:read) ? "" : (body || "")
 
     resource = uri.path.empty? ? "/" : uri.path
 
@@ -242,9 +236,8 @@ module HttpSigner
     string_to_sign = parts.join("\n")
 
     if @debug_mode
-      $stderr.puts "[SIGV2-APPLY DEBUG] method=#{method.to_s.upcase}"
-      $stderr.puts "[SIGV2-APPLY DEBUG] resource=#{resource}"
-      $stderr.puts "[SIGV2-APPLY DEBUG] string_to_sign=#{string_to_sign.inspect}"
+      warn "\e[35m[SIGV2]\e[0m method=\e[1m#{method.to_s.upcase}\e[0m resource=\e[33m#{resource}\e[0m"
+      warn "\e[35m[SIGV2]\e[0m string_to_sign=\e[2m#{string_to_sign.inspect}\e[0m"
     end
 
     signature = Base64.strict_encode64(
@@ -274,9 +267,8 @@ module HttpSigner
                 end
 
     if @debug_mode
-      $stderr.puts "[SIGV4-APPLY DEBUG] method=#{method.to_s.upcase}"
-      $stderr.puts "[SIGV4-APPLY DEBUG] url=#{uri.to_s}"
-      $stderr.puts "[SIGV4-APPLY DEBUG] request_headers=#{request_headers.inspect}"
+      warn "\e[35m[SIGV4]\e[0m method=\e[1m#{method.to_s.upcase}\e[0m url=\e[33m#{uri}\e[0m"
+      warn "\e[35m[SIGV4]\e[0m request_headers=\e[2m#{request_headers.inspect}\e[0m"
     end
 
     signature = @signer.sign_request(
@@ -287,7 +279,7 @@ module HttpSigner
     )
 
     if @debug_mode
-      $stderr.puts "[SIGV4-APPLY DEBUG] signed_headers=#{signature.headers.inspect}"
+      warn "\e[35m[SIGV4]\e[0m signed=\e[2m#{signature.headers.inspect}\e[0m"
     end
 
     signature.headers.each { |name, value| request[name] = value }

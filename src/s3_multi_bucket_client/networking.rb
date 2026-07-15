@@ -12,11 +12,11 @@ class S3MultiBucketClient
     S3BaseClient.validate_bucket!(bucket)
     S3BaseClient.validate_key!(key) unless key.to_s.empty?
 
-    if key.to_s.empty? || key.to_s == "/"
-      path = "/#{bucket}"
-    else
-      path = "/#{bucket}/#{CGI.escape(key).gsub('+', '%20').gsub('%7E', '~')}".gsub('//', '/')
-    end
+    path = if key.to_s.empty? || key.to_s == "/"
+             "/#{bucket}"
+           else
+             "/#{bucket}/#{CGI.escape(key).gsub('+', '%20').gsub('%7E', '~')}".gsub('//', '/')
+           end
 
     uri = URI.parse("#{@endpoint}#{path}")
 
@@ -32,7 +32,7 @@ class S3MultiBucketClient
       if v.nil?
         CGI.escape(k.to_s)
       else
-        "#{CGI.escape(k.to_s)}=#{v.to_s}"
+        "#{CGI.escape(k.to_s)}=#{v}"
       end
     end.join("&")
   end
@@ -84,7 +84,7 @@ class S3MultiBucketClient
                 end
 
     log_request_details(method_str, uri, body_size) if @debug_mode
-    log_debug "→ #{method_str} #{uri.path}#{"?#{uri.query}" if uri.query} body=#{body_size}"
+    log_debug "\e[32m →\e[0m \e[1m#{method_str}\e[0m \e[2m#{uri.path}\e[0m#{"\e[35m?#{uri.query}\e[0m" if uri.query} \e[2mbody=#{body_size}B\e[0m"
 
     execute_with_retry(method_str, uri, max_attempts: @max_retries + 1) do
       make_http_request(uri) do |http|

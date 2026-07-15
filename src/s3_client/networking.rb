@@ -44,7 +44,7 @@ class S3Client
 
     q.map do |k, v|
       ck = CGI.escape(k.to_s)
-      v.nil? ? ck : "#{ck}=#{v.to_s}"
+      v.nil? ? ck : "#{ck}=#{v}"
     end.join("&")
   end
 
@@ -59,8 +59,9 @@ class S3Client
     body_size = body.is_a?(String) ? body.bytesize : 0
 
     log_request_details(method, uri, body_size) if @debug_mode
-    log_debug "→ #{method.to_s.upcase} #{uri.path}#{"?#{uri.query}" if uri.query} " \
-              "body=#{body_size}B#{' (stream)' if stream}"
+    log_debug "\e[32m →\e[0m \e[1m#{method.to_s.upcase}\e[0m " \
+              "\e[2m#{uri.path}\e[0m#{"\e[35m?#{uri.query}\e[0m" if uri.query} " \
+              "\e[2mbody=#{body_size}B\e[0m#{' \e[33m(stream)\e[0m' if stream}"
 
     max_attempts = streaming ? 1 : @max_retries + 1
     method_label = method.to_s.upcase

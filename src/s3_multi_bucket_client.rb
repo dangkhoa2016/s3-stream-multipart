@@ -49,7 +49,7 @@ class S3MultiBucketClient < S3BaseClient
 
   # UploadError, DownloadError (and S3Error) are inherited from S3BaseClient.
 
-  attr_reader :endpoint, :region, :access_key_id, :secret_access_key, :session_token, :signer, :logger,
+  attr_reader :endpoint, :region, :bucket, :access_key_id, :secret_access_key, :session_token, :signer, :logger,
               :part_size, :max_concurrency, :max_retries, :retry_delay, :upload_state_manager
 
   # Initialize S3 client

@@ -30,8 +30,14 @@ module RequestExecutor
       t_req = now_mono
       result = yield
       elapsed_ms = (now_mono - t_req) * 1000
-      log_debug "← #{result.code} #{method_label} #{uri.path} " \
-                "#{elapsed_ms.round(1)}ms req_id=#{result['x-amz-request-id'].inspect}"
+      code = result.code.to_i
+      status_color = if code < 300
+                       "\e[32m"
+                     else
+                       code < 400 ? "\e[33m" : "\e[31m"
+                     end
+      log_debug "\e[32m ←\e[0m #{status_color}#{result.code}\e[0m \e[1m#{method_label}\e[0m \e[2m#{uri.path}\e[0m " \
+                "\e[36m#{elapsed_ms.round(1)}ms\e[0m req_id=\e[2m#{result['x-amz-request-id'].inspect}\e[0m"
       log_response_details(result) if @debug_mode
 
       code = result.code.to_i
