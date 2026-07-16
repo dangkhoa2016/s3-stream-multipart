@@ -1,5 +1,7 @@
 # S3Client - Detailed Usage Guide
 
+> 🌐 Language / Ngôn ngữ: **English** | [Tiếng Việt](USAGE_GUIDE.s3_client.vi.md)
+
 A pure Ruby library (no AWS SDK dependency) for uploading/downloading large files to S3-compatible storage (AWS S3, MinIO, Cloudflare R2, Backblaze B2, …) with the following features:
 
 - **Memory-efficient** — streaming upload/download, never loads the whole file into RAM
@@ -654,10 +656,22 @@ Methods raise exceptions on failure — they do NOT return `{error:, state:}` ha
 | Exception | Description |
 |---|---|
 | `S3Client::S3Error` | S3 server returned 4xx/5xx |
-| `S3Client::UploadError` | Upload failed |
+| `S3Client::UploadError` | Upload failed (includes S3 error code/message from XML body) |
 | `S3Client::DownloadError` | Download failed |
 
 All inherit from `RuntimeError`.
+
+### S3Error attributes
+
+`S3Error` parses the XML response body and provides structured access to the error details:
+
+| Attribute | Type | Description |
+|---|---|---|
+| `code` | `String` | HTTP status code (e.g. `"404"`, `"403"`) |
+| `request_id` | `String` | AWS request ID from `x-amz-request-id` header |
+| `s3_code` | `String` | S3 error code from XML `<Code>` (e.g. `"NoSuchBucket"`) |
+| `s3_message` | `String` | S3 error message from XML `<Message>` |
+| `s3_bucket` | `String` | Bucket name from XML `<BucketName>` |
 
 ```ruby
 begin
@@ -669,9 +683,20 @@ begin
 rescue S3Client::UploadError => e
   puts "Upload failed: #{e.message}"
 rescue S3Client::S3Error => e
-  puts "S3 error: #{e.message} (code=#{e.code})"
+  puts "S3 error: #{e.message}"
+  puts "  code: #{e.code}"         # HTTP status
+  puts "  s3_code: #{e.s3_code}"   # S3 error code
+  puts "  bucket: #{e.s3_bucket}"  # Bucket name
 end
 ```
+
+### XML response validation
+
+Before parsing XML responses (e.g. from `list_objects`, `list_multipart_uploads`, `list_parts`), the client validates the response Content-Type. If the response is explicitly non-XML (e.g. HTML), an `S3Error` is raised with a descriptive message instead of a cryptic REXML parse error.
+
+### Endpoint validation
+
+When constructing an `S3Client` with a custom `endpoint:`, the endpoint URL is validated to ensure it starts with `http://` or `https://` and has a valid hostname. Invalid endpoints raise `ArgumentError` at construction time.
 
 ---
 
