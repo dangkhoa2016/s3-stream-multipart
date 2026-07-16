@@ -22,6 +22,17 @@ require "openssl"
 # build_http_request and generate_presigned_url are public API.
 
 module HttpSigner
+  # AWS S3 subresources that must be included in the SigV2 canonicalized resource.
+  # See: https://docs.aws.amazon.com/AmazonS3/latest/userguide/RESTAuthentication.html
+  SIGV2_SUBRESOURCES = %w[
+    acl delete lifecycle location logging notification
+    partNumber policy requestPayment response-cache-control
+    response-content-disposition response-content-encoding
+    response-content-language response-content-type response-expires
+    restore tagging torrent uploadId uploads versionId versioning
+    versions website x-id
+  ].freeze
+
   # Generate a presigned URL using the configured SigV4 signer.
   #
   # @param uri        [URI] the target URI
@@ -76,6 +87,22 @@ module HttpSigner
 
   private
 
+  # Build the SigV2 canonicalized resource, including query-string subresources
+  # (e.g. ?uploads, ?uploadId=..., ?partNumber=...) that AWS requires in the
+  # signature calculation.
+  def _sigv2_resource(uri)
+    path = uri.path.empty? ? "/" : uri.path
+    return path if uri.query.nil? || uri.query.empty?
+
+    params = URI.decode_www_form(uri.query).to_h
+    subs = params.slice(*SIGV2_SUBRESOURCES)
+    return path if subs.empty?
+
+    sorted = subs.sort_by { |k, _| k }
+    qs = sorted.map { |k, v| v.nil? || v.empty? ? k : "#{k}=#{v}" }.join("&")
+    "#{path}?#{qs}"
+  end
+
   # ─────────────────────────────────────────────────────────────────────
   #  SigV2 signing
   # ─────────────────────────────────────────────────────────────────────
@@ -96,10 +123,16 @@ module HttpSigner
     end
 
     content_type = (extra_headers || {}).find { |k, _| k.to_s.downcase == "content-type" }
-    content_type_val = content_type ? content_type[1].to_s : ""
+    content_type_val = if content_type
+                         content_type[1].to_s
+                       elsif is_string_body || is_stream_body
+                         "application/octet-stream"
+                       else
+                         ""
+                       end
     md5 = ""
 
-    resource = uri.path.empty? ? "/" : uri.path
+    resource = _sigv2_resource(uri)
 
     parts = [method.to_s.upcase, md5, content_type_val, date_str]
     amz_headers.sort.each { |k, v| parts << "#{k}:#{v}" }
@@ -124,8 +157,8 @@ module HttpSigner
     if is_string_body
       req.body = body
       req["Content-Type"] ||= "application/octet-stream"
-    elsif is_stream_body && body.respond_to?(:read)
-      req.body_stream = body
+    elsif is_stream_body
+      req.body_stream = body if body.respond_to?(:read)
       req["Content-Length"] = content_length.to_s if content_length && !req["Content-Length"]
       req["Content-Type"] ||= "application/octet-stream"
     end
@@ -185,8 +218,8 @@ module HttpSigner
     if is_string_body
       req.body = body
       req["Content-Type"] ||= "application/octet-stream"
-    elsif is_stream_body && body.respond_to?(:read)
-      req.body_stream = body
+    elsif is_stream_body
+      req.body_stream = body if body.respond_to?(:read)
       req["Content-Length"] = content_length.to_s if content_length && !req["Content-Length"]
       req["Content-Type"] ||= "application/octet-stream"
     end
@@ -228,7 +261,7 @@ module HttpSigner
 
     md5 = ""
 
-    resource = uri.path.empty? ? "/" : uri.path
+    resource = _sigv2_resource(uri)
 
     parts = [method.to_s.upcase, md5, content_type_val, date_str]
     amz_headers.sort.each { |k, v| parts << "#{k}:#{v}" }

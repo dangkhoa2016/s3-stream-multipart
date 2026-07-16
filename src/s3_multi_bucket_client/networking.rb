@@ -15,7 +15,8 @@ class S3MultiBucketClient
     path = if key.to_s.empty? || key.to_s == "/"
              "/#{bucket}"
            else
-             "/#{bucket}/#{CGI.escape(key).gsub('+', '%20').gsub('%7E', '~')}".gsub('//', '/')
+             encoded_key = key.split("/", -1).map { |s| CGI.escape(s).gsub('+', '%20').gsub('%7E', '~') }.join('/')
+             "/#{bucket}/#{encoded_key.sub(%r{^/+}, '')}"
            end
 
     uri = URI.parse("#{@endpoint}#{path}")
@@ -32,7 +33,7 @@ class S3MultiBucketClient
       if v.nil?
         CGI.escape(k.to_s)
       else
-        "#{CGI.escape(k.to_s)}=#{v}"
+        "#{CGI.escape(k.to_s)}=#{CGI.escape(v.to_s)}"
       end
     end.join("&")
   end
@@ -178,6 +179,17 @@ class S3MultiBucketClient
   # Result formatting for downloads.
   def _format_download_result(key, bucket, local_path, size, resumed, elapsed: nil)
     { key: key, bucket: bucket, destination: local_path, size: size, resumed: resumed }
+  end
+
+  public
+
+  # List all buckets for the account (S3 ListAllMyBuckets).
+  # Only works for multi-bucket clients (endpoint-based).
+  def list_buckets
+    uri = URI.parse("#{@endpoint}/")
+    resp = signed_request(:get, uri)
+    check_response!(resp, context: "list_buckets")
+    parse_buckets_xml(resp.body)
   end
 
   # Stream a download chunk by chunk — MBC builds URI + signs + retries.

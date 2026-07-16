@@ -118,6 +118,8 @@ class S3MultiBucketClient < S3BaseClient
       @endpoint = endpoint.chomp('/')
     end
 
+    self.class.validate_endpoint!(@endpoint) if @endpoint
+
     @part_size = part_size
     raise ArgumentError, "part_size too small: #{@part_size} (min #{MIN_PART_SIZE})" if @part_size < MIN_PART_SIZE
 
@@ -167,6 +169,8 @@ class S3MultiBucketClient < S3BaseClient
   # defined in s3_multi_bucket_client/networking.rb.
 end
 
+require_relative "upload/upload_service"
+require_relative "upload/resume_upload"
 require_relative "s3_multi_bucket_client/networking"
 require_relative "s3_multi_bucket_client/upload"
 require_relative "s3_multi_bucket_client/download"

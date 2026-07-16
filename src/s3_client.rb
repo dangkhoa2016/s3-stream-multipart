@@ -104,6 +104,7 @@ class S3Client < S3BaseClient
     @secret_access_key  = sk
 
     endpoint = opts[:endpoint]
+    self.class.validate_endpoint!(endpoint) if endpoint
     endpoint_style = opts.fetch(:endpoint_style, :auto)
     @endpoint_style = resolve_style(endpoint_style, endpoint)
     @endpoint       = build_endpoint(endpoint, region, bucket, @endpoint_style)
@@ -171,6 +172,8 @@ class S3Client < S3BaseClient
   end
 end
 
+require_relative "upload/upload_service"
+require_relative "upload/resume_upload"
 require_relative "s3_client/networking"
 require_relative "s3_client/upload"
 require_relative "s3_client/download"

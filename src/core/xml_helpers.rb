@@ -100,4 +100,16 @@ module S3XmlHelpers
       response['Content-Length'].to_i + start_byte
     end
   end
+
+  def parse_buckets_xml(xml)
+    doc = REXML::Document.new(xml)
+    buckets = []
+    doc.elements.each("//Bucket") do |el|
+      buckets << {
+        name: el.elements["Name"]&.text,
+        creation_date: el.elements["CreationDate"]&.text
+      }
+    end
+    buckets
+  end
 end

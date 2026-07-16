@@ -172,4 +172,23 @@ class S3Client
   def _resume_download(key, paths:, on_progress:, bucket: nil)
     stream_single_bucket_download(key, paths, on_progress)
   end
+
+  # List all buckets for the account (S3 ListAllMyBuckets).
+  # For path-style endpoints, uses the endpoint directly.
+  # For virtual-hosted style, constructs the S3 service root URL.
+  def list_buckets
+    base_url = if @endpoint_style == :path
+                 @endpoint
+               else
+                 "https://s3.#{@region}.amazonaws.com"
+               end
+    uri = URI.parse("#{base_url}/")
+    req = Net::HTTP::Get.new("/")
+    apply_signer_headers!(req, :get, uri, "")
+    _http_start(uri) do |http|
+      resp = http.request(req)
+      check_response!(resp, context: "list_buckets")
+      parse_buckets_xml(resp.body)
+    end
+  end
 end

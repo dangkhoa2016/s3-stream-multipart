@@ -4,6 +4,8 @@
 # Reopens S3MultiBucketClient to define download methods.
 
 require_relative "../download/part_downloader"
+require_relative "../download/download_service"
+require_relative "../extras/bulk_downloader"
 
 class S3MultiBucketClient
   # Download a part via HTTP — called by PartDownloader.
@@ -33,5 +35,21 @@ class S3MultiBucketClient
       range: range, on_progress: on_progress,
       bucket: bucket
     )
+  end
+
+  # =========================================================================
+  # BULK DOWNLOAD
+  # =========================================================================
+
+  def download_directory(bucket:, local_directory:, prefix: "", delimiter: nil,
+                         exclude: [], max_files: 4,
+                         on_file_start: nil, on_file_complete: nil, on_file_error: nil)
+    S3BulkDownloader.new(
+      client: self, local_directory: local_directory, prefix: prefix,
+      delimiter: delimiter, bucket: bucket, exclude: exclude,
+      max_files: max_files,
+      on_file_start: on_file_start, on_file_complete: on_file_complete,
+      on_file_error: on_file_error
+    ).run!
   end
 end
