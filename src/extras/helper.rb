@@ -130,7 +130,7 @@ module S3Helper
                        multipart_threshold: 100 * 1024 * 1024,
                        on_file_start: nil, on_file_complete: nil, on_file_error: nil,
                        content_type: nil, metadata: {}, cache_control: nil,
-                       skip_existing: false, state_dir: nil)
+                       skip_existing: true, resume: true, state_dir: nil)
     uploader = S3BulkUploader.new(
       client: client, directory: directory, prefix: prefix,
       bucket: bucket, pattern: pattern, exclude: exclude,
@@ -138,7 +138,7 @@ module S3Helper
       on_file_start: on_file_start, on_file_complete: on_file_complete,
       on_file_error: on_file_error,
       content_type: content_type, metadata: metadata, cache_control: cache_control,
-      skip_existing: skip_existing, state_dir: state_dir
+      skip_existing: skip_existing, resume: resume, state_dir: state_dir
     )
     uploader.run!
   end

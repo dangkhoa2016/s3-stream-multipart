@@ -148,17 +148,494 @@ module S3SM
     end
   end
 
+  module Commands
+    class Upload
+      extend Formatters
+
+      def self.call(client, args)
+        opts = parse_opts(args)
+        abort "#{C.red_bold('✗')} Usage: s3sm upload <local_path> [--key KEY] [--bucket BUCKET]" unless opts[:local_path]
+
+        path = opts[:local_path]
+        key  = opts[:key] || File.basename(path)
+        opts[:key] = key
+        size = File.exist?(path) ? format_size(File.size(path)) : nil
+
+        $stdout.print "#{C.dim('⬆  Uploading')} #{C.bold(File.basename(path))}"
+        $stdout.print " #{C.dim("(#{size})")}" if size
+        $stdout.print " #{C.dim('→')} #{C.cyan_bold(key)}"
+        $stdout.print " #{C.dim('in')} #{C.magenta_bold(opts[:bucket] || 'default')}" if opts[:bucket]
+        $stdout.puts
+
+        result = client.upload_file(**opts.except(:file_path))
+        puts "  #{C.green_bold('✓')} #{C.green('Uploaded')} #{C.bold(result.key)}"
+      rescue S3BaseClient::UploadError => e
+        abort "#{C.red_bold('✗')} #{e.message}"
+      end
+
+      def self.parse_opts(args)
+        opts = { local_path: nil, file_path: nil, key: nil, bucket: nil,
+                 content_type: "application/octet-stream", metadata: {},
+                 cache_control: nil, skip_existing: false,
+                 concurrency: nil, retries: nil }
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm upload <local_path> [options]"
+          o.on("--key KEY", "S3 object key (default: filename)") { |v| opts[:key] = v }
+          o.on("--bucket BUCKET", "Bucket name (default: ENV['AWS_BUCKET'] or global)") { |v| opts[:bucket] = v }
+          o.on("--content-type TYPE", "Content-Type header") { |v| opts[:content_type] = v }
+          o.on("--skip-existing", "Skip if object already exists") { opts[:skip_existing] = true }
+          o.on("--concurrency N", Integer, "Max concurrent threads") { |v| opts[:concurrency] = v }
+          o.on("--retries N", Integer, "Max retries per part") { |v| opts[:retries] = v }
+          o.on("--cache-control VAL", "Cache-Control header") { |v| opts[:cache_control] = v }
+        end.parse!(args)
+
+        path = args.shift
+        if path
+          opts[:local_path] = path
+          opts[:file_path]  = path
+        end
+        opts[:bucket] ||= ENV.fetch("AWS_BUCKET", nil)
+        opts[:metadata] = {} if opts[:metadata].nil?
+        opts.compact
+      end
+    end
+
+    class Download
+      def self.call(client, args)
+        opts = parse_opts(args)
+        abort "#{C.red_bold('✗')} Usage: s3sm download <key> [local_path] --bucket BUCKET" unless opts[:key]
+
+        $stdout.puts "#{C.dim('⬇  Downloading')} #{C.cyan_bold(opts[:key])} #{C.dim('→')} #{C.bold(opts[:destination_path] || '.')}"
+        result = client.download_file(**opts)
+        puts "  #{C.green_bold('✓')} #{C.green('Downloaded to')} #{C.bold(result.local_path)}"
+      rescue S3BaseClient::DownloadError => e
+        abort "#{C.red_bold('✗')} #{e.message}"
+      end
+
+      def self.parse_opts(args)
+        opts = { key: nil, bucket: nil, destination_path: nil, local_path: nil, resume: false }
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm download <key> [local_path] [options]"
+          o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+          o.on("--resume", "Resume previous download") { opts[:resume] = true }
+        end.parse!(args)
+
+        opts[:key] = args.shift
+        if (dest = args.shift)
+          opts[:destination_path] = dest
+          opts[:local_path]       = dest
+        end
+        opts.compact
+      end
+    end
+
+    class Presign
+      def self.call(client, args)
+        opts = parse_opts(args)
+        abort "#{C.red_bold('✗')} Usage: s3sm presign <key> [--bucket BUCKET]" unless opts[:key]
+
+        url = client.presigned_url(**opts)
+        puts "#{C.dim('🔗')} #{C.under}#{url}#{C::RESET}"
+        puts ""
+        puts "#{C.dim('Expires in')} #{C.yellow_bold(opts[:expires_in])} #{C.dim('seconds')}"
+      end
+
+      def self.parse_opts(args)
+        opts = { key: nil, bucket: nil, expires_in: 3600, method: :get }
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm presign <key> [options]"
+          o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+          o.on("--expires SECONDS", Integer, "Expiration in seconds (default: 3600)") { |v| opts[:expires_in] = v }
+          o.on("--method METHOD", %w[get put delete head], "HTTP method (get/put/delete/head)") { |v| opts[:method] = v.to_sym }
+        end.parse!(args)
+
+        opts[:key] = args.shift
+        opts.compact
+      end
+    end
+
+    class Delete
+      def self.call(client, args)
+        opts = parse_opts(args)
+        abort "#{C.red_bold('✗')} Usage: s3sm delete <key> [--bucket BUCKET]" unless opts[:key]
+
+        client.delete_object(**opts)
+        puts "#{C.red_bold('✗')} #{C.red('Deleted')} #{C.bold(opts[:key])}"
+      end
+
+      def self.parse_opts(args)
+        opts = { key: nil, bucket: nil }
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm delete <key> [options]"
+          o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+        end.parse!(args)
+
+        opts[:key] = args.shift
+        opts.compact
+      end
+    end
+
+    class List
+      extend Formatters
+
+      def self.call(client, args)
+        opts = parse_opts(args)
+        opts[:bucket] ||= client.bucket
+
+        if opts[:bucket]
+          list_objects_in_bucket(client, opts)
+        elsif client.respond_to?(:list_buckets)
+          puts "  #{C.dim('ℹ')} #{C.dim('No bucket specified — listing all buckets.')}"
+          list_all_buckets(client, opts)
+        else
+          abort "#{C.red_bold('✗')} No bucket specified. Use --bucket or set AWS_BUCKET."
+        end
+      end
+
+      def self.list_objects_in_bucket(client, opts)
+        result = client.list_objects(**opts)
+        contents = result[:contents]
+        common_prefixes = result[:common_prefixes]
+
+        bucket_label = C.magenta_bold(opts[:bucket] || "default")
+        prefix_label = opts[:prefix] ? " #{C.dim('(prefix:')} #{C.cyan(opts[:prefix])}#{C.dim(')')}" : ""
+
+        puts ""
+        puts "  #{C.bold('📦')} #{C.bold('Objects in')} #{bucket_label}#{prefix_label}"
+        puts "  #{C.dim('─' * 78)}"
+
+        if contents.empty? && common_prefixes.empty?
+          puts "  #{C.dim('(empty)')}"
+          puts ""
+          return
+        end
+
+        unless contents.empty?
+          header = "  #{C.bold(C.white('Key'))}  #{C.bold(C.white('Size'))}  " \
+                   "#{C.bold(C.white('Last Modified'))}  #{C.bold(C.white('Class'))}  #{C.bold(C.white('ETag'))}"
+          puts header
+          puts "  #{C.dim('─' * 78)}"
+
+          contents.each do |obj|
+            size_str = obj[:size] ? format_size(obj[:size]) : "—"
+            key_display = obj[:key].to_s
+            key_display = "#{C.dim('…')}#{key_display[-57..]}" if key_display.length > 60
+            key_display = C.green_bold(key_display)
+
+            size_padded = size_str.rjust(10)
+            size_display = case obj[:size]
+                           when nil..0         then C.dim(size_padded)
+                           when 1..(1024**2)   then C.green(size_padded)
+                           when (1024**2)..(1024**3) then C.yellow(size_padded)
+                           else C.red_bold(size_padded)
+                           end
+
+            puts "  #{key_display}  #{size_display}  #{C.dim(obj[:last_modified])}  #{C.cyan(obj[:storage_class])}  #{C.dim(obj[:etag])}"
+          end
+        end
+
+        if common_prefixes.any?
+          puts ""
+          puts "  #{C.bold('📁')} #{C.bold('Common prefixes:')}"
+          common_prefixes.each { |p| puts "  #{C.blue_bold(p)}" }
+        end
+
+        total_size = contents.sum { |o| o[:size] || 0 }
+        puts ""
+        puts "  #{C.dim('─' * 78)}"
+        puts "  #{C.bold('Total:')} #{C.green_bold(contents.size.to_s)} #{contents.size == 1 ? 'object' : 'objects'}, #{C.yellow_bold(format_size(total_size))}"
+        puts ""
+      end
+
+      def self.list_all_buckets(client, _opts)
+        buckets = client.list_buckets
+
+        puts ""
+        puts "  #{C.bold('📦')} #{C.bold('Buckets')}"
+        puts "  #{C.dim('─' * 78)}"
+
+        if buckets.empty?
+          puts "  #{C.dim('(no buckets)')}"
+          puts ""
+          return
+        end
+
+        buckets.each do |bucket_info|
+          name = bucket_info[:name]
+          created = bucket_info[:creation_date] ? "  #{C.dim(bucket_info[:creation_date])}" : ""
+          puts "  #{C.magenta_bold(name)}#{created}"
+        end
+
+        puts ""
+        puts "  #{C.dim('─' * 78)}"
+        puts "  #{C.bold('Total:')} #{C.green_bold(buckets.size.to_s)} #{buckets.size == 1 ? 'bucket' : 'buckets'}"
+        puts ""
+      end
+
+      def self.parse_opts(args)
+        opts = { bucket: nil, prefix: nil, delimiter: "/", max_keys: 100, paginate: true, recursive: false }
+        delimiter_set = false
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm list [options]"
+          o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+          o.on("--prefix PREFIX", "Filter by key prefix") { |v| opts[:prefix] = v }
+          o.on("--delimiter DELIM", "Delimiter (default: /, ignored if --recursive)") do |v|
+            opts[:delimiter] = v
+            delimiter_set = true
+          end
+          o.on("--recursive", "List all objects recursively (sets delimiter=\"\")") { opts[:recursive] = true }
+          o.on("--max-keys N", Integer, "Max keys to list (default: 1000)") { |v| opts[:max_keys] = v }
+          o.on("--no-paginate", "Disable auto-pagination") { opts[:paginate] = false }
+        end.parse!(args)
+
+        if opts[:recursive] && delimiter_set
+          warn "#{C.yellow_bold('⚠')} Both --recursive and --delimiter specified: --delimiter takes precedence, --recursive ignored."
+        elsif opts[:recursive]
+          opts[:delimiter] = ""
+        end
+
+        opts.delete(:recursive)
+        opts.compact
+      end
+    end
+
+    class ListParts
+      extend Formatters
+
+      def self.call(client, args)
+        opts = parse_opts(args)
+        abort "#{C.red_bold('✗')} Usage: s3sm list-parts <key> --upload-id ID [--bucket BUCKET]" unless opts[:key] && opts[:upload_id]
+
+        result = client.list_parts(**opts)
+        parts = result[:parts] || []
+
+        puts ""
+        puts "  #{C.bold('🔩')} #{C.bold('Parts for')} #{C.cyan_bold(opts[:key])}"
+        puts "  #{C.dim('Upload:')} #{C.yellow(opts[:upload_id])}"
+        puts "  #{C.dim('─' * 60)}"
+
+        if parts.empty?
+          puts "  #{C.dim('(no parts)')}"
+        else
+          puts "  #{C.bold(C.white('Part'))}  #{C.bold(C.white('ETag'))}  #{C.bold(C.white('Size'))}"
+          puts "  #{C.dim('─' * 60)}"
+          parts.each do |p|
+            puts "  #{C.magenta_bold("Part #{p[:part_number]}").ljust(12)} #{C.dim(p[:etag])}  #{C.green(format_size(p[:size]))}"
+          end
+        end
+        puts ""
+      end
+
+      def self.parse_opts(args)
+        opts = { key: nil, upload_id: nil, bucket: nil, max_parts: 100 }
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm list-parts <key> --upload-id ID [options]"
+          o.on("--upload-id ID", "Upload ID (required)") { |v| opts[:upload_id] = v }
+          o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+          o.on("--max-parts N", Integer, "Max parts to list") { |v| opts[:max_parts] = v }
+        end.parse!(args)
+
+        opts[:key] = args.shift
+        opts.compact
+      end
+    end
+
+    class ListUploads
+      def self.call(client, args)
+        opts = parse_opts(args)
+
+        result = client.list_multipart_uploads(**opts)
+        uploads = result[:uploads] || []
+
+        prefix_label = opts[:prefix] ? " #{C.dim('(prefix:')} #{C.cyan(opts[:prefix])}#{C.dim(')')}" : ""
+
+        puts ""
+        puts "  #{C.bold('📋')} #{C.bold('Multipart uploads')}#{prefix_label}"
+        puts "  #{C.dim('─' * 70)}"
+
+        if uploads.empty?
+          puts "  #{C.dim('(none)')}"
+        else
+          puts "  #{C.bold(C.white('Key'))}  #{C.bold(C.white('Upload ID'))}  #{C.bold(C.white('Initiated'))}"
+          puts "  #{C.dim('─' * 70)}"
+          uploads.each do |u|
+            puts "  #{C.green_bold(u[:key])}  #{C.yellow(u[:upload_id])}  #{C.dim(u[:initiated])}"
+          end
+        end
+        puts ""
+      end
+
+      def self.parse_opts(args)
+        opts = { bucket: nil, prefix: nil, max_uploads: 100 }
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm list-uploads [options]"
+          o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+          o.on("--prefix PREFIX", "Filter by key prefix") { |v| opts[:prefix] = v }
+          o.on("--max-uploads N", Integer, "Max uploads to list") { |v| opts[:max_uploads] = v }
+        end.parse!(args)
+
+        opts.compact
+      end
+    end
+
+    class UploadDir
+      extend Formatters
+
+      def self.call(client, args, error_formatter: nil)
+        opts = parse_opts(args)
+        abort "#{C.red_bold('✗')} Usage: s3sm upload-dir <directory> [--bucket BUCKET]" unless opts[:directory]
+
+        skip_label = opts[:skip_existing] ? "skip-existing" : "overwrite"
+        resume_label = opts[:resume] ? "resume" : "no-resume"
+        $stdout.puts "#{C.dim('📂 Uploading directory')} #{C.bold(opts[:directory])} #{C.dim('→')} #{C.magenta_bold(opts[:bucket] || 'default')}"
+        $stdout.puts "#{C.dim('   Mode:')} #{C.cyan(skip_label)}, #{C.cyan(resume_label)}"
+
+        result = client.upload_directory(**opts, on_file_start: build_on_start, on_file_complete: build_on_complete)
+
+        print_summary(result, opts[:directory])
+      rescue S3Errors::S3Error => e
+        abort error_formatter&.call(e) || e.message
+      rescue Errno::ENOENT => e
+        abort "#{C.red_bold('✗')} #{e.message}"
+      end
+
+      def self.parse_opts(args)
+        opts = { directory: nil, bucket: nil, prefix: "", pattern: "**/*",
+                 exclude: [], max_files: 4, skip_existing: true, resume: true }
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm upload-dir <directory> [options]"
+          o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+          o.on("--prefix PREFIX", "Key prefix for uploaded files") { |v| opts[:prefix] = v }
+          o.on("--pattern PAT", "File glob pattern (default: **/*)") { |v| opts[:pattern] = v }
+          o.on("--max-files N", Integer, "Max concurrent file uploads") { |v| opts[:max_files] = v }
+          o.on("--no-skip-existing", "Upload even if file already exists with matching size/etag") { opts[:skip_existing] = false }
+          o.on("--resume", "Resume interrupted multipart uploads from state files") { opts[:resume] = true }
+          o.on("--state-dir DIR", "Directory for per-file resume state (default: /tmp/s3sm-state)") do |v|
+            opts[:state_dir] = v
+          end
+        end.parse!(args)
+
+        opts[:directory] = args.shift
+        opts[:bucket] ||= ENV.fetch("AWS_BUCKET", nil)
+        opts[:state_dir] ||= "/tmp/s3sm-state" if opts[:resume]
+        opts.compact
+      end
+
+      def self.build_on_start
+        lambda do |path, key, idx, total|
+          name = File.basename(path)
+          $stdout.puts "  #{C.dim('⬆')} [#{C.cyan_bold("#{idx}/#{total}")}] #{C.bold(name)} #{C.dim('→')} #{C.cyan(key)}"
+        end
+      end
+
+      def self.build_on_complete
+        lambda do |path, _key, result, idx, total|
+          size = result.is_a?(Hash) ? result[:size] : nil
+          elapsed = result.is_a?(Hash) ? result[:elapsed] : nil
+          info = []
+          info << C.dim(format_size(size)) if size
+          info << C.dim("#{format('%.2f', elapsed)}s") if elapsed
+          suffix = info.empty? ? "" : " (#{info.join(', ')})"
+          $stdout.puts "  #{C.green_bold('✓')} [#{C.cyan_bold("#{idx}/#{total}")}] #{C.green(File.basename(path))}#{suffix}"
+        end
+      end
+
+      def self.print_summary(result, directory)
+        uploaded_count = result[:uploaded].size
+        failed_count   = result[:failed].size
+        skipped_count  = result[:skipped].size
+
+        $stdout.puts ""
+        if uploaded_count.positive?
+          puts "  #{C.green_bold('✓')} #{C.green('Uploaded')} #{C.green_bold(uploaded_count.to_s)} " \
+               "#{uploaded_count == 1 ? 'file' : 'files'} from #{C.bold(directory)}"
+        end
+        if failed_count.positive?
+          puts "  #{C.red_bold('✗')} #{C.red('Failed')} #{C.red_bold(failed_count.to_s)} " \
+               "#{failed_count == 1 ? 'file' : 'files'}"
+          result[:failed].each do |f|
+            puts "    #{C.red('•')} #{f[:key]}: #{C.dim(f[:error])}"
+          end
+        end
+        return unless skipped_count.positive?
+
+        puts "  #{C.yellow_bold('⊘')} #{C.yellow('Skipped')} #{C.yellow_bold(skipped_count.to_s)} " \
+             "#{skipped_count == 1 ? 'file' : 'files'}"
+      end
+      private_class_method :build_on_start, :build_on_complete, :print_summary
+    end
+
+    class DownloadDir
+      def self.call(client, args, error_formatter: nil)
+        opts = parse_opts(args)
+        abort "#{C.red_bold('✗')} Usage: s3sm download-dir <local_directory> [--prefix PREFIX] [--bucket BUCKET]" unless opts[:local_directory]
+
+        $stdout.puts "#{C.dim('📂 Downloading from')} #{C.cyan_bold(opts[:prefix] || '/')} #{C.dim('→')} #{C.bold(opts[:local_directory])}"
+        result = client.download_directory(**opts)
+
+        print_summary(result, opts[:local_directory])
+      rescue S3Errors::S3Error => e
+        abort error_formatter&.call(e) || e.message
+      rescue Errno::ENOENT => e
+        abort "#{C.red_bold('✗')} #{e.message}"
+      end
+
+      def self.parse_opts(args)
+        opts = { local_directory: nil, prefix: "", delimiter: nil,
+                 exclude: [], max_files: 4 }
+        OptionParser.new do |o|
+          o.banner = "#{C.bold('Usage:')} s3sm download-dir <local_directory> [options]"
+          o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
+          o.on("--prefix PREFIX", "Key prefix to filter objects") { |v| opts[:prefix] = v }
+          o.on("--delimiter DELIM", "Delimiter for listing (default: auto)") { |v| opts[:delimiter] = v }
+          o.on("--max-files N", Integer, "Max concurrent file downloads") { |v| opts[:max_files] = v }
+        end.parse!(args)
+
+        opts[:local_directory] = args.shift
+        opts[:bucket] ||= ENV.fetch("AWS_BUCKET", nil)
+        opts.compact
+      end
+
+      def self.print_summary(result, local_directory)
+        downloaded_count = result[:downloaded].size
+        failed_count     = result[:failed].size
+
+        if downloaded_count.positive?
+          puts "  #{C.green_bold('✓')} #{C.green('Downloaded')} #{C.green_bold(downloaded_count.to_s)} " \
+               "#{downloaded_count == 1 ? 'file' : 'files'} to #{C.bold(local_directory)}"
+        end
+        return unless failed_count.positive?
+
+        puts "  #{C.red_bold('✗')} #{C.red('Failed')} #{C.red_bold(failed_count.to_s)} " \
+             "#{failed_count == 1 ? 'file' : 'files'}"
+        result[:failed].each do |f|
+          puts "    #{C.red('•')} #{f[:key]}: #{C.dim(f[:error])}"
+        end
+      end
+      private_class_method :print_summary
+    end
+  end
+
   class CLI
     include Formatters
 
-    COMMANDS = %w[upload download presign delete list list-parts list-uploads upload-dir].freeze
+    COMMANDS = %w[upload download presign delete list list-parts list-uploads upload-dir download-dir].freeze
+
+    # Global options that take a value argument
+    GLOBAL_OPTS_WITH_VALUE = %w[
+      --endpoint --region --access-key --secret-key
+      --endpoint-style --signature-version
+    ].freeze
+
+    # Boolean global options (no value argument)
+    GLOBAL_OPTS_BOOLEAN = %w[--debug --help].freeze
 
     def run(args)
       global, command, command_args = parse(args)
       return print_help if global[:help]
 
       client = build_client(global)
-      send("cmd_#{command.tr('-', '_')}", client, command_args)
+      dispatch(command, client, command_args)
     rescue KeyError
       abort "#{C.red_bold('✗')} Unknown command: #{C.bold(command)}. Run #{C.cyan('s3sm --help')} for usage."
     rescue OptionParser::MissingArgument, OptionParser::InvalidOption => e
@@ -169,7 +646,28 @@ module S3SM
       abort "#{C.red_bold('✗')} #{e.class}: #{e.message}"
     end
 
+    COMMAND_MAP = {
+      "upload" => Commands::Upload,
+      "download" => Commands::Download,
+      "presign" => Commands::Presign,
+      "delete" => Commands::Delete,
+      "list" => Commands::List,
+      "list-parts" => Commands::ListParts,
+      "list-uploads" => Commands::ListUploads,
+      "upload-dir" => Commands::UploadDir,
+      "download-dir" => Commands::DownloadDir
+    }.freeze
+
     private
+
+    def dispatch(command, client, args)
+      cmd_class = COMMAND_MAP.fetch(command)
+      if [Commands::UploadDir, Commands::DownloadDir].include?(cmd_class)
+        cmd_class.call(client, args, error_formatter: method(:format_s3_error_from_exception))
+      else
+        cmd_class.call(client, args)
+      end
+    end
 
     def parse(args)
       global = {}
@@ -197,18 +695,60 @@ module S3SM
         o.separator "    #{C.green_bold('list-parts')}  List parts of a multipart upload"
         o.separator "    #{C.green_bold('list-uploads')} List active multipart uploads"
         o.separator "    #{C.green_bold('upload-dir')}  Upload a directory"
+        o.separator "    #{C.green_bold('download-dir')} Download a directory"
         o.separator ""
         o.on("-h", "--help", "Show this help") { global[:help] = true }
       end
-      rest = opts.permute!(args)
-      global[:help] ||= rest.empty?
-      command = rest.shift
-      [global, command, rest]
+
+      cmd_idx = args.index { |a| COMMANDS.include?(a) }
+
+      if cmd_idx
+        pre_args  = args[0...cmd_idx]
+        command   = args[cmd_idx]
+        post_args = args[(cmd_idx + 1)..]
+      else
+        pre_args  = args.dup
+        command   = nil
+        post_args = []
+      end
+
+      opts.order!(pre_args)
+
+      extracted, post_args = extract_global_from_args(post_args)
+      opts.order!(extracted)
+
+      global[:help] ||= command.nil? && pre_args.empty? && post_args.empty?
+      [global, command, post_args]
+    end
+
+    def extract_global_from_args(args)
+      global = []
+      rest = []
+      i = 0
+      while i < args.length
+        if GLOBAL_OPTS_WITH_VALUE.include?(args[i])
+          global << args[i]
+          if i + 1 < args.length
+            global << args[i + 1]
+            i += 2
+          else
+            i += 1
+          end
+        elsif GLOBAL_OPTS_BOOLEAN.include?(args[i])
+          global << args[i]
+          i += 1
+        else
+          rest << args[i]
+          i += 1
+        end
+      end
+      [global, rest]
     end
 
     def build_client(global)
       region  = global[:region]  || ENV.fetch("AWS_REGION", "us-east-1")
       bucket  = global[:bucket]  || ENV.fetch("AWS_BUCKET", nil)
+      bucket = nil if bucket.to_s.strip.empty?
       endpoint = global[:endpoint] || ENV.fetch("AWS_ENDPOINT", nil)
       endpoint = "https://#{endpoint}" if endpoint && !endpoint.start_with?("http://", "https://")
       ak      = global[:'access-key'] || ENV.fetch("AWS_ACCESS_KEY_ID", nil)
@@ -233,307 +773,6 @@ module S3SM
     rescue KeyError => e
       abort "#{C.red_bold('✗')} Missing required credential: #{e.message}"
     end
-
-    # ── Upload ──────────────────────────────────────────────────────
-
-    def cmd_upload(client, args)
-      opts = parse_upload_opts(args)
-      abort "#{C.red_bold('✗')} Usage: s3sm upload <local_path> --key KEY [--bucket BUCKET]" unless opts[:local_path] && opts[:key]
-
-      path = opts[:local_path]
-      key  = opts[:key]
-      size = File.exist?(path) ? format_size(File.size(path)) : nil
-
-      $stdout.print "#{C.dim('⬆  Uploading')} #{C.bold(File.basename(path))}"
-      $stdout.print " #{C.dim("(#{size})")}" if size
-      $stdout.print " #{C.dim('→')} #{C.cyan_bold(key)}"
-      $stdout.print " #{C.dim('in')} #{C.magenta_bold(opts[:bucket] || 'default')}" if opts[:bucket]
-      $stdout.puts
-
-      result = client.upload_file(**opts)
-
-      puts "  #{C.green_bold('✓')} #{C.green('Uploaded')} #{C.bold(result.key)}"
-    end
-
-    def parse_upload_opts(args)
-      opts = { local_path: nil, file_path: nil, key: nil, bucket: nil,
-               content_type: "application/octet-stream", metadata: {},
-               cache_control: nil, skip_existing: false,
-               concurrency: nil, retries: nil }
-      OptionParser.new do |o|
-        o.banner = "#{C.bold('Usage:')} s3sm upload <local_path> [options]"
-        o.on("--key KEY", "S3 object key (required)") { |v| opts[:key] = v }
-        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
-        o.on("--content-type TYPE", "Content-Type header") { |v| opts[:content_type] = v }
-        o.on("--skip-existing", "Skip if object already exists") { opts[:skip_existing] = true }
-        o.on("--concurrency N", Integer, "Max concurrent threads") { |v| opts[:concurrency] = v }
-        o.on("--retries N", Integer, "Max retries per part") { |v| opts[:retries] = v }
-        o.on("--cache-control VAL", "Cache-Control header") { |v| opts[:cache_control] = v }
-      end.order!(args)
-
-      path = args.shift
-      if path
-        opts[:local_path] = path
-        opts[:file_path]  = path
-      end
-      opts[:metadata] = {} if opts[:metadata].nil?
-      opts.compact
-    end
-
-    # ── Download ────────────────────────────────────────────────────
-
-    def cmd_download(client, args)
-      opts = parse_download_opts(args)
-      abort "#{C.red_bold('✗')} Usage: s3sm download <key> [local_path] --bucket BUCKET" unless opts[:key]
-
-      $stdout.puts "#{C.dim('⬇  Downloading')} #{C.cyan_bold(opts[:key])} #{C.dim('→')} #{C.bold(opts[:destination_path] || '.')}"
-      result = client.download_file(**opts)
-      puts "  #{C.green_bold('✓')} #{C.green('Downloaded to')} #{C.bold(result.local_path)}"
-    end
-
-    def parse_download_opts(args)
-      opts = { key: nil, bucket: nil, destination_path: nil, local_path: nil,
-               resume: false }
-      OptionParser.new do |o|
-        o.banner = "#{C.bold('Usage:')} s3sm download <key> [local_path] [options]"
-        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
-        o.on("--resume", "Resume previous download") { opts[:resume] = true }
-      end.order!(args)
-
-      opts[:key] = args.shift
-      if (dest = args.shift)
-        opts[:destination_path] = dest
-        opts[:local_path]       = dest
-      end
-      opts.compact
-    end
-
-    # ── Presign ─────────────────────────────────────────────────────
-
-    def cmd_presign(client, args)
-      opts = parse_presign_opts(args)
-      abort "#{C.red_bold('✗')} Usage: s3sm presign <key> [--bucket BUCKET]" unless opts[:key]
-
-      url = client.presigned_url(**opts)
-      puts "#{C.dim('🔗')} #{C.under}#{url}#{C::RESET}"
-      puts ""
-      puts "#{C.dim('Expires in')} #{C.yellow_bold(opts[:expires_in])} #{C.dim('seconds')}"
-    end
-
-    def parse_presign_opts(args)
-      opts = { key: nil, bucket: nil, expires_in: 3600, method: :get }
-      OptionParser.new do |o|
-        o.banner = "#{C.bold('Usage:')} s3sm presign <key> [options]"
-        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
-        o.on("--expires SECONDS", Integer, "Expiration in seconds (default: 3600)") { |v| opts[:expires_in] = v }
-        o.on("--method METHOD", %w[get put delete head], "HTTP method (get/put/delete/head)") { |v| opts[:method] = v.to_sym }
-      end.order!(args)
-
-      opts[:key] = args.shift
-      opts.compact
-    end
-
-    # ── Delete ──────────────────────────────────────────────────────
-
-    def cmd_delete(client, args)
-      opts = parse_delete_opts(args)
-      abort "#{C.red_bold('✗')} Usage: s3sm delete <key> [--bucket BUCKET]" unless opts[:key]
-
-      client.delete_object(**opts)
-      puts "#{C.red_bold('✗')} #{C.red('Deleted')} #{C.bold(opts[:key])}"
-    end
-
-    def parse_delete_opts(args)
-      opts = { key: nil, bucket: nil }
-      OptionParser.new do |o|
-        o.banner = "#{C.bold('Usage:')} s3sm delete <key> [options]"
-        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
-      end.order!(args)
-
-      opts[:key] = args.shift
-      opts.compact
-    end
-
-    # ── List ────────────────────────────────────────────────────────
-
-    def cmd_list(client, args)
-      opts = parse_list_opts(args)
-      opts[:bucket] ||= client.bucket
-
-      result = client.list_objects(**opts)
-      contents = result[:contents]
-      common_prefixes = result[:common_prefixes]
-
-      bucket_label = C.magenta_bold(opts[:bucket] || "default")
-      prefix_label = opts[:prefix] ? " #{C.dim('(prefix:')} #{C.cyan(opts[:prefix])}#{C.dim(')')}" : ""
-
-      puts ""
-      puts "  #{C.bold('📦')} #{C.bold('Objects in')} #{bucket_label}#{prefix_label}"
-      puts "  #{C.dim('─' * 78)}"
-
-      if contents.empty? && common_prefixes.empty?
-        puts "  #{C.dim('(empty)')}"
-        puts ""
-        return
-      end
-
-      unless contents.empty?
-        header = "  #{C.bold(C.white('Key'))}  #{C.bold(C.white('Size'))}  " \
-                 "#{C.bold(C.white('Last Modified'))}  #{C.bold(C.white('Class'))}  #{C.bold(C.white('ETag'))}"
-        puts header
-        puts "  #{C.dim('─' * 78)}"
-
-        contents.each do |obj|
-          size_str = obj[:size] ? format_size(obj[:size]) : "—"
-          key_display = obj[:key].to_s
-          key_display = "#{C.dim('…')}#{key_display[-57..]}" if key_display.length > 60
-          key_display = C.green_bold(key_display)
-
-          size_padded = size_str.rjust(10)
-          size_display = case obj[:size]
-                         when nil..0         then C.dim(size_padded)
-                         when 1..(1024**2)   then C.green(size_padded)
-                         when (1024**2)..(1024**3) then C.yellow(size_padded)
-                         else C.red_bold(size_padded)
-                         end
-
-          puts "  #{key_display}  #{size_display}  #{C.dim(obj[:last_modified])}  #{C.cyan(obj[:storage_class])}  #{C.dim(obj[:etag])}"
-        end
-      end
-
-      if common_prefixes.any?
-        puts ""
-        puts "  #{C.bold('📁')} #{C.bold('Common prefixes:')}"
-        common_prefixes.each { |p| puts "  #{C.blue_bold(p)}" }
-      end
-
-      total_size = contents.sum { |o| o[:size] || 0 }
-      puts ""
-      puts "  #{C.dim('─' * 78)}"
-      puts "  #{C.bold('Total:')} #{C.green_bold(contents.size.to_s)} #{contents.size == 1 ? 'object' : 'objects'}, #{C.yellow_bold(format_size(total_size))}"
-      puts ""
-    end
-
-    def parse_list_opts(args)
-      opts = { bucket: nil, prefix: nil, delimiter: "/", max_keys: 100, paginate: true }
-      OptionParser.new do |o|
-        o.banner = "#{C.bold('Usage:')} s3sm list [options]"
-        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
-        o.on("--prefix PREFIX", "Filter by key prefix") { |v| opts[:prefix] = v }
-        o.on("--delimiter DELIM", "Delimiter (default: /)") { |v| opts[:delimiter] = v }
-        o.on("--max-keys N", Integer, "Max keys to list (default: 1000)") { |v| opts[:max_keys] = v }
-        o.on("--no-paginate", "Disable auto-pagination") { opts[:paginate] = false }
-      end.order!(args)
-
-      opts.compact
-    end
-
-    # ── List Parts ──────────────────────────────────────────────────
-
-    def cmd_list_parts(client, args)
-      opts = parse_list_parts_opts(args)
-      abort "#{C.red_bold('✗')} Usage: s3sm list-parts <key> --upload-id ID [--bucket BUCKET]" unless opts[:key] && opts[:upload_id]
-
-      result = client.list_parts(**opts)
-      parts = result[:parts] || []
-
-      puts ""
-      puts "  #{C.bold('🔩')} #{C.bold('Parts for')} #{C.cyan_bold(opts[:key])}"
-      puts "  #{C.dim('Upload:')} #{C.yellow(opts[:upload_id])}"
-      puts "  #{C.dim('─' * 60)}"
-
-      if parts.empty?
-        puts "  #{C.dim('(no parts)')}"
-      else
-        puts "  #{C.bold(C.white('Part'))}  #{C.bold(C.white('ETag'))}  #{C.bold(C.white('Size'))}"
-        puts "  #{C.dim('─' * 60)}"
-        parts.each do |p|
-          puts "  #{C.magenta_bold("Part #{p[:part_number]}").ljust(12)} #{C.dim(p[:etag])}  #{C.green(format_size(p[:size]))}"
-        end
-      end
-      puts ""
-    end
-
-    def parse_list_parts_opts(args)
-      opts = { key: nil, upload_id: nil, bucket: nil, max_parts: 100 }
-      OptionParser.new do |o|
-        o.banner = "#{C.bold('Usage:')} s3sm list-parts <key> --upload-id ID [options]"
-        o.on("--upload-id ID", "Upload ID (required)") { |v| opts[:upload_id] = v }
-        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
-        o.on("--max-parts N", Integer, "Max parts to list") { |v| opts[:max_parts] = v }
-      end.order!(args)
-
-      opts[:key] = args.shift
-      opts.compact
-    end
-
-    # ── List Uploads ────────────────────────────────────────────────
-
-    def cmd_list_uploads(client, args)
-      opts = parse_list_uploads_opts(args)
-
-      result = client.list_multipart_uploads(**opts)
-      uploads = result[:uploads] || []
-
-      prefix_label = opts[:prefix] ? " #{C.dim('(prefix:')} #{C.cyan(opts[:prefix])}#{C.dim(')')}" : ""
-
-      puts ""
-      puts "  #{C.bold('📋')} #{C.bold('Multipart uploads')}#{prefix_label}"
-      puts "  #{C.dim('─' * 70)}"
-
-      if uploads.empty?
-        puts "  #{C.dim('(none)')}"
-      else
-        puts "  #{C.bold(C.white('Key'))}  #{C.bold(C.white('Upload ID'))}  #{C.bold(C.white('Initiated'))}"
-        puts "  #{C.dim('─' * 70)}"
-        uploads.each do |u|
-          puts "  #{C.green_bold(u[:key])}  #{C.yellow(u[:upload_id])}  #{C.dim(u[:initiated])}"
-        end
-      end
-      puts ""
-    end
-
-    def parse_list_uploads_opts(args)
-      opts = { bucket: nil, prefix: nil, max_uploads: 100 }
-      OptionParser.new do |o|
-        o.banner = "#{C.bold('Usage:')} s3sm list-uploads [options]"
-        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
-        o.on("--prefix PREFIX", "Filter by key prefix") { |v| opts[:prefix] = v }
-        o.on("--max-uploads N", Integer, "Max uploads to list") { |v| opts[:max_uploads] = v }
-      end.order!(args)
-
-      opts.compact
-    end
-
-    # ── Upload Dir ──────────────────────────────────────────────────
-
-    def cmd_upload_dir(client, args)
-      opts = parse_upload_dir_opts(args)
-      abort "#{C.red_bold('✗')} Usage: s3sm upload-dir <directory> [--bucket BUCKET]" unless opts[:directory]
-
-      $stdout.puts "#{C.dim('📂 Uploading directory')} #{C.bold(opts[:directory])} #{C.dim('→')} #{C.magenta_bold(opts[:bucket] || 'default')}"
-      result = client.upload_directory(**opts)
-      puts "  #{C.green_bold('✓')} #{C.green('Uploaded')} #{C.green_bold(result.size.to_s)} " \
-           "#{result.size == 1 ? 'file' : 'files'} from #{C.bold(opts[:directory])}"
-    end
-
-    def parse_upload_dir_opts(args)
-      opts = { directory: nil, bucket: nil, prefix: "", pattern: "**/*",
-               exclude: [], max_files: 4, skip_existing: false }
-      OptionParser.new do |o|
-        o.banner = "#{C.bold('Usage:')} s3sm upload-dir <directory> [options]"
-        o.on("--bucket BUCKET", "Bucket name (overrides global)") { |v| opts[:bucket] = v }
-        o.on("--prefix PREFIX", "Key prefix for uploaded files") { |v| opts[:prefix] = v }
-        o.on("--pattern PAT", "File glob pattern (default: **/*)") { |v| opts[:pattern] = v }
-        o.on("--max-files N", Integer, "Max concurrent file uploads") { |v| opts[:max_files] = v }
-        o.on("--skip-existing", "Skip objects that already exist") { opts[:skip_existing] = true }
-      end.order!(args)
-
-      opts[:directory] = args.shift
-      opts.compact
-    end
-
-    # ── Help ────────────────────────────────────────────────────────
 
     def print_help
       puts ""
@@ -562,6 +801,7 @@ module S3SM
       puts "      #{C.green_bold('list-parts')} <key>         List multipart upload parts"
       puts "      #{C.green_bold('list-uploads')}             List active multipart uploads"
       puts "      #{C.green_bold('upload-dir')} <directory>   Upload a directory"
+      puts "      #{C.green_bold('download-dir')} <local_dir>  Download a directory"
       puts ""
       puts "  #{C.dim('Run:')} #{C.cyan('s3sm <command> --help')} #{C.dim('for command-specific options.')}"
       puts "  #{C.dim('Environment:')} #{C.yellow('AWS_ACCESS_KEY_ID')}, #{C.yellow('AWS_SECRET_ACCESS_KEY')}, #{C.yellow('AWS_REGION')},"

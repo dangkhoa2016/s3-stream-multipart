@@ -1,5 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "../core/result"
+require_relative "empty_upload"
+require_relative "single_part_upload"
+require_relative "multipart_upload"
+
 class S3BaseClient
   # Auto-dispatches uploads to EmptyUpload, SinglePartUpload, or MultipartUpload.
   # Determines strategy based on file size relative to part_size.
@@ -12,7 +17,7 @@ class S3BaseClient
     def call(key:, local_path: nil,
              content_type: "application/octet-stream", metadata: {}, cache_control: nil,
              part_size: nil, on_progress: nil,
-             state_file: nil, skip_existing: false,
+             state_file: nil, skip_existing: true,
              max_threads: nil,
              max_retries: nil, retry_delay: nil,
              bucket: nil)
