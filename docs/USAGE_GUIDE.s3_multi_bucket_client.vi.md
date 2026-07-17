@@ -1,53 +1,53 @@
-# S3MultiBucketClient - Detailed Usage Guide
+# S3MultiBucketClient — Hướng dẫn sử dụng chi tiết
 
-> 🌐 Language / Ngôn ngữ: **English** | [Tiếng Việt](USAGE_GUIDE.s3_multi_bucket_client.vi.md)
+> 🌐 Language / Ngôn ngữ: [English](USAGE_GUIDE.s3_multi_bucket_client.md) | **Tiếng Việt**
 
-A pure Ruby library (no AWS SDK dependency) for uploading/downloading large files to S3-compatible storage (AWS S3, MinIO, Cloudflare R2, Backblaze B2, …) with the following features:
+Thư viện Ruby thuần (không phụ thuộc AWS SDK) để upload/download file lớn lên lưu trữ tương thích S3 (AWS S3, MinIO, Cloudflare R2, Backblaze B2, …) với các tính năng:
 
-- **Memory-efficient** — streaming upload/download, never loads the whole file into RAM
-- **Resumable** — persists state to a JSON file; Ctrl+C then re-run to resume (both upload & download)
-- **Parallel** — thread pool uploads multiple parts in parallel
-- **SSE encryption** — supports SSE-S3, SSE-KMS, SSE-C
-- **Retry** — automatic retry with exponential backoff + jitter for transient errors and 429
-- **Observable** — structured logging, debug mode, event callbacks, thread-safe logging
-- **Auto-dispatch** — `upload_file` automatically chooses single PUT or multipart based on file size
+- **Tiết kiệm bộ nhớ** — streaming upload/download, không load toàn bộ file vào RAM
+- **Có thể tiếp tục** — lưu trạng thái vào file JSON; Ctrl+C rồi chạy lại để tiếp tục (cả upload & download)
+- **Song song** — thread pool upload nhiều part song song
+- **Mã hoá SSE** — hỗ trợ SSE-S3, SSE-KMS, SSE-C
+- **Retry** — tự động retry với exponential backoff + jitter cho lỗi transient và 429
+- **Có thể theo dõi** — structured logging, debug mode, event callbacks, thread-safe logging
+- **Tự động dispatch** — `upload_file` tự động chọn single PUT hoặc multipart dựa trên kích thước file
 
 ---
 
-## Table of contents
+## Mục lục
 
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Initializing the client](#initializing-the-client)
-  - [SSE encryption](#sse-encryption)
-- [Uploading files](#uploading-files)
+- [Yêu cầu](#yêu-cầu)
+- [Cài đặt](#cài-đặt)
+- [Khởi tạo client](#khởi-tạo-client)
+  - [Mã hoá SSE](#mã-hoá-sse)
+- [Upload file](#upload-file)
   - [Auto-dispatch upload](#auto-dispatch-upload)
-  - [Resumable upload with state file](#resumable-upload-with-state-file)
-  - [Explicit resume with resume_upload](#explicit-resume-with-resume_upload)
-- [Downloading files](#downloading-files)
+  - [Resumable upload với state file](#resumable-upload-với-state-file)
+  - [Resume tường minh với resume_upload](#resume-tường-minh-với-resume_upload)
+- [Download file](#download-file)
   - [Streaming download](#streaming-download)
-  - [Download with Range](#download-with-range)
-  - [Block-based streaming (no disk write)](#block-based-streaming-no-disk-write)
+  - [Download với Range](#download-với-range)
+  - [Streaming dạng block (không ghi đĩa)](#streaming-dạng-block-không-ghi-đĩa)
 - [HEAD / DELETE object](#head--delete-object)
-- [Low-level multipart API](#low-level-multipart-api)
+- [Multipart API cấp thấp](#multipart-api-cấp-thấp)
 - [Presigned URL](#presigned-url)
-- [UploadState class](#uploadstate-class)
-- [DownloadState class](#downloadstate-class)
-- [PartUploader class](#partuploader-class)
-- [S3Helper convenience module](#s3helper-convenience-module)
-- [Logging & Observability](#logging--observability)
+- [Lớp UploadState](#lớp-uploadstate)
+- [Lớp DownloadState](#lớp-downloadstate)
+- [Lớp PartUploader](#lớp-partuploader)
+- [Module tiện ích S3Helper](#module-tiện-ích-s3helper)
+- [Logging & Quan sát](#logging--quan-sát)
   - [Structured Logging](#structured-logging)
-  - [Debug Mode](#debug-mode)
-  - [Event Callbacks — 21 lifecycle events](#event-callbacks--21-lifecycle-events)
+  - [Chế độ Debug](#chế-độ-debug)
+  - [Event Callbacks — 21 sự kiện vòng đời](#event-callbacks--21-sự-kiện-vòng-đời)
   - [Thread-safe Logging](#thread-safe-logging)
-  - [Debugging the state file after a crash](#debugging-the-state-file-after-a-crash)
-- [Manual testing against real S3](#manual-testing-against-real-s3)
-- [Running the automated test suite](#running-the-automated-test-suite)
-- [Troubleshooting common errors](#troubleshooting-common-errors)
+  - [Gỡ lỗi state file sau crash](#gỡ-lỗi-state-file-sau-crash)
+- [Kiểm thử thủ công với S3 thật](#kiểm-thử-thủ-công-với-s3-thật)
+- [Chạy bộ kiểm thử tự động](#chạy-bộ-kiểm-thử-tự-động)
+- [Xử lý lỗi thường gặp](#xử-lý-lỗi-thường-gặp)
 
 ---
 
-## Requirements
+## Yêu cầu
 
 - Ruby >= 2.7.8+
 - Gem: `aws-sigv4`
@@ -56,9 +56,9 @@ A pure Ruby library (no AWS SDK dependency) for uploading/downloading large file
 gem install aws-sigv4
 ```
 
-## Installation
+## Cài đặt
 
-Copy `s3_multi_bucket_client.rb` into your project and require it:
+Copy `s3_multi_bucket_client.rb` vào dự án và require:
 
 ```ruby
 require_relative 'path/to/src/s3_multi_bucket_client'
@@ -66,9 +66,9 @@ require_relative 'path/to/src/s3_multi_bucket_client'
 
 ---
 
-## Initializing the client
+## Khởi tạo client
 
-### Basic
+### Cơ bản
 
 ```ruby
 require 'logger'
@@ -82,7 +82,7 @@ client = S3MultiBucketClient.new(
 )
 ```
 
-### With MinIO / Cloudflare R2 (path-style endpoint)
+### Với MinIO / Cloudflare R2 (path-style endpoint)
 
 ```ruby
 client = S3MultiBucketClient.new(
@@ -94,7 +94,7 @@ client = S3MultiBucketClient.new(
 )
 ```
 
-### With a session token (STS temporary credentials)
+### Với session token (STS temporary credentials)
 
 ```ruby
 client = S3MultiBucketClient.new(
@@ -108,34 +108,34 @@ client = S3MultiBucketClient.new(
 )
 ```
 
-### Initialization parameters
+### Tham số khởi tạo
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `endpoint` | String | (required unless `bucket:`) | S3 endpoint |
-| `region` | String | (required) | AWS region |
-| `access_key_id` | String | (required) | AWS Access Key |
-| `secret_access_key` | String | (required) | AWS Secret Key |
-| `bucket` | String | `nil` | Optional default bucket |
+| Tham số | Kiểu | Mặc định | Mô tả |
+|---------|------|---------|-------|
+| `endpoint` | String | (bắt buộc trừ khi có `bucket:`) | S3 endpoint |
+| `region` | String | (bắt buộc) | AWS region |
+| `access_key_id` | String | (bắt buộc) | AWS Access Key |
+| `secret_access_key` | String | (bắt buộc) | AWS Secret Key |
+| `bucket` | String | `nil` | Bucket mặc định (tuỳ chọn) |
 | `session_token` | String | `nil` | STS token |
-| `part_size` | Integer | `8 * 1024 * 1024` | Part size (8 MB) |
-| `max_concurrency` | Integer | `4` | Parallel threads (1–32) |
-| `max_retries` | Integer | `3` | Retry count |
-| `retry_delay` | Float | `0.25` | Backoff base delay |
-| `open_timeout` | Integer | `30` | Connection timeout |
-| `read_timeout` | Integer | `600` | Read timeout |
+| `part_size` | Integer | `8 * 1024 * 1024` | Kích thước part (8 MB) |
+| `max_concurrency` | Integer | `4` | Số luồng song song (1–32) |
+| `max_retries` | Integer | `3` | Số lần retry |
+| `retry_delay` | Float | `0.25` | Thời gian chờ backoff cơ bản |
+| `open_timeout` | Integer | `30` | Timeout kết nối |
+| `read_timeout` | Integer | `600` | Timeout đọc |
 | `endpoint_style` | Symbol | `:auto` | `:auto` / `:virtual_hosted` / `:path` |
-| `logger` | Logger | `nil` | Custom Logger |
-| `log_file` | String | `nil` | Log file path |
-| `log_format` | Symbol | `:text` | `:text` or `:json` |
-| `log_color` | Boolean | `false` | ANSI color |
-| `debug` | Boolean | `false` | Detailed HTTP logging |
-| `sse` | Hash | `nil` | SSE config |
+| `logger` | Logger | `nil` | Logger tuỳ chỉnh |
+| `log_file` | String | `nil` | Đường dẫn file log |
+| `log_format` | Symbol | `:text` | `:text` hoặc `:json` |
+| `log_color` | Boolean | `false` | Màu ANSI |
+| `debug` | Boolean | `false` | Log HTTP chi tiết |
+| `sse` | Hash | `nil` | Cấu hình SSE |
 
-### SSE encryption
+### Mã hoá SSE
 
 ```ruby
-# SSE-S3 (AWS-managed key)
+# SSE-S3 (key do AWS quản lý)
 client = S3MultiBucketClient.new(
   ...,
   sse: { type: 'AES256' }
@@ -147,7 +147,7 @@ client = S3MultiBucketClient.new(
   sse: { type: 'aws:kms', kms_key_id: 'arn:aws:kms:us-east-1:123456:key/abc-...' }
 )
 
-# SSE-C (Customer-provided key — key sent on every request, NEVER logged)
+# SSE-C (key do khách hàng cung cấp — key gửi mỗi request, KHÔNG bao giờ log)
 require 'base64'
 require 'digest'
 raw_key = SecureRandom.bytes(32)
@@ -163,17 +163,17 @@ client = S3MultiBucketClient.new(
 
 ---
 
-## Uploading files
+## Upload file
 
 ### Auto-dispatch upload
 
-`upload_file` automatically dispatches based on file size:
-- **0 bytes** → EmptyUpload (no HTTP request)
+`upload_file` tự động dispatch dựa trên kích thước file:
+- **0 byte** → EmptyUpload (không có HTTP request)
 - **≤ part_size** → SinglePartUpload (single PUT)
-- **> part_size** → MultipartUpload (parallel, resumable)
+- **> part_size** → MultipartUpload (song song, có thể tiếp tục)
 
 ```ruby
-# Small file → single PUT
+# File nhỏ → single PUT
 result = client.upload_file(
   bucket:       'my-bucket',
   key:          'data/report.csv',
@@ -190,7 +190,7 @@ puts result.to_h   # { key: "data/report.csv", size: 1048576, ... }
 ```
 
 ```ruby
-# Large file → multipart (parallel, resumable)
+# File lớn → multipart (song song, có thể tiếp tục)
 result = client.upload_file(
   bucket:       'my-bucket',
   key:          'data/huge.bin',
@@ -207,18 +207,18 @@ result = client.upload_file(
 # => #<data UploadResult key="data/huge.bin", size=209715200, etag="\"abc-...\"", elapsed=35.2, throughput=5.68, extra={upload_id: "abc-123-...", parts_uploaded: 25}>
 ```
 
-**RAM consumption:** `~part_size × max_threads` (each thread reads one part into a buffer before sending).
+**Tiêu thụ RAM:** `~part_size × max_threads` (mỗi luồng đọc một part vào bộ đệm trước khi gửi).
 
-> **S3 constraints:** `5MB ≤ part_size ≤ 5GB`, maximum **10,000 parts**/file. The library auto-adjusts `part_size` if the limit would be exceeded.
+> **Ràng buộc S3:** `5MB ≤ part_size ≤ 5GB`, tối đa **10.000 parts**/file. Thư viện tự động điều chỉnh `part_size` nếu vượt quá giới hạn.
 
-**On failure:** raises `S3BaseClient::UploadError` or `S3BaseClient::S3Error`.
+**Khi thất bại:** ném `S3BaseClient::UploadError` hoặc `S3BaseClient::S3Error`.
 
-### Resumable upload with state file
+### Resumable upload với state file
 
-When uploading large files over an unreliable network:
+Khi upload file lớn qua mạng không ổn định:
 
 ```ruby
-# First run: pass state_file
+# Lần chạy đầu: truyền state_file
 client.upload_file(
   bucket:     'my-bucket',
   key:        'data/huge.bin',
@@ -226,11 +226,11 @@ client.upload_file(
   state_file: '/tmp/huge.upload.json'
 )
 
-# If Ctrl+C or crash occurs, re-run the same command → auto-resumes
-# State file is automatically deleted when the upload completes
+# Nếu Ctrl+C hoặc crash, chạy lại lệnh tương tự → tự động resume
+# State file tự động xoá khi upload hoàn tất
 ```
 
-### Explicit resume with `resume_upload`
+### Resume tường minh với `resume_upload`
 
 ```ruby
 result = client.resume_upload(
@@ -247,11 +247,11 @@ result = client.resume_upload(
 
 ---
 
-## Downloading files
+## Download file
 
 ### Streaming download
 
-Streams chunks from the server to disk, RAM never grows with file size.
+Stream chunks từ server xuống đĩa, RAM không tăng theo kích thước file.
 
 ```ruby
 result = client.download_file(
@@ -268,12 +268,12 @@ puts result.path   # "/tmp/huge_copy.bin"
 puts result[:size] # 209715200
 ```
 
-### Download with Range
+### Download với Range
 
-`download_file` supports the `range:` parameter for partial downloads:
+`download_file` hỗ trợ tham số `range:` cho download một phần:
 
 ```ruby
-# Download bytes 0 → 1MB-1 (first 1MB) — using an Array
+# Download bytes 0 → 1MB-1 (1MB đầu) — dùng Array
 client.download_file(
   bucket:           'my-bucket',
   key:              'data/huge.bin',
@@ -281,7 +281,7 @@ client.download_file(
   range:            [0, 1024 * 1024 - 1]
 )
 
-# Or using a Ruby Range
+# Hoặc dùng Ruby Range
 client.download_file(
   bucket:           'my-bucket',
   key:              'data/huge.bin',
@@ -298,16 +298,16 @@ client.download_file(
 )
 ```
 
-### Block-based streaming (no disk write)
+### Streaming dạng block (không ghi đĩa)
 
-Pipe directly into a parser / upstream proxy / unzip:
+Pipe trực tiếp vào parser / upstream proxy / unzip:
 
 ```ruby
 client.download_stream(bucket: 'my-bucket', key: 'data/huge.bin') do |chunk|
   $stdout.write(chunk)
 end
 
-# With Range
+# Với Range
 written = client.download_stream(
   bucket: 'my-bucket',
   key:    'data/huge.bin',
@@ -319,7 +319,7 @@ written = client.download_stream(
 
 ## HEAD / DELETE object
 
-### HEAD — get metadata
+### HEAD — lấy metadata
 
 ```ruby
 info = client.head_object(bucket: 'my-bucket', key: 'data/file.txt')
@@ -337,7 +337,7 @@ puts info[:metadata]['author']   # "alice"
 puts info[:storage_class]        # "STANDARD"
 ```
 
-### DELETE — delete an object
+### DELETE — xoá object
 
 ```ruby
 result = client.delete_object(bucket: 'my-bucket', key: 'data/file.txt')
@@ -346,12 +346,12 @@ result = client.delete_object(bucket: 'my-bucket', key: 'data/file.txt')
 
 ---
 
-## Low-level multipart API
+## Multipart API cấp thấp
 
-For use cases that manage the multipart lifecycle manually (e.g., resuming across processes/machines):
+Cho trường hợp tự quản lý vòng đời multipart (ví dụ tiếp tục qua process/máy khác):
 
 ```ruby
-# 1. Start a multipart upload
+# 1. Bắt đầu multipart upload
 upload_id = client.multipart_start(
   bucket:       'my-bucket',
   key:          'data/file.bin',
@@ -360,7 +360,7 @@ upload_id = client.multipart_start(
   cache_control: 'max-age=86400'
 )
 
-# 2. Upload each part
+# 2. Upload từng part
 etag1 = client.multipart_upload_part(
   bucket:      'my-bucket',
   key:         'data/file.bin',
@@ -369,7 +369,7 @@ etag1 = client.multipart_upload_part(
   body:        File.binread('/tmp/part1.bin')
 )
 
-# Or with IO
+# Hoặc với IO
 File.open('/tmp/part2.bin', 'rb') do |f|
   etag2 = client.multipart_upload_part(
     bucket:      'my-bucket',
@@ -382,7 +382,7 @@ File.open('/tmp/part2.bin', 'rb') do |f|
   )
 end
 
-# 3. Complete
+# 3. Hoàn tất
 final_etag = client.multipart_complete(
   bucket:    'my-bucket',
   key:       'data/file.bin',
@@ -393,7 +393,7 @@ final_etag = client.multipart_complete(
   ]
 )
 
-# Or abort
+# Hoặc huỷ
 client.multipart_abort(
   bucket:    'my-bucket',
   key:       'data/file.bin',
@@ -405,10 +405,10 @@ client.multipart_abort(
 
 ## Presigned URL
 
-Generate temporary signed URLs, no credentials needed:
+Tạo URL ký tạm thời, không cần thông tin xác thực:
 
 ```ruby
-# GET URL (read file)
+# GET URL (đọc file)
 url = client.presigned_url(
   bucket:     'my-bucket',
   key:        'data/file.txt',
@@ -424,7 +424,7 @@ url = client.presigned_url(
   expires_in: 600
 )
 
-# With additional query params
+# Với tham số query bổ sung
 url = client.presigned_url(
   bucket:     'my-bucket',
   key:        'data/file.txt',
@@ -436,12 +436,12 @@ url = client.presigned_url(
 
 ---
 
-## UploadState class
+## Lớp UploadState
 
-OOP wrapper for resumable upload state:
+Wrapper OOP cho trạng thái resumable upload:
 
 ```ruby
-# Create new
+# Tạo mới
 state = S3MultiBucketClient::UploadState.new(
   upload_id:  'abc-123',
   key:        'data/file.bin',
@@ -463,7 +463,7 @@ state.save_to_file('/tmp/state.json')
 state = S3MultiBucketClient::UploadState.from_json(json_string)
 state = S3MultiBucketClient::UploadState.from_file('/tmp/state.json')
 
-# Tracking methods
+# Phương thức theo dõi
 state.upload_id               # "abc-123"
 state.completed_parts_count   # 2
 state.total_parts             # 25
@@ -474,33 +474,33 @@ state.next_part_number        # 3
 state.part_list               # [{part_number: 1, etag: '"e1"'}, ...]
 state.completed?              # false
 
-# Session & tracking
-state.upload_session_id       # "a5f8bf53ebadba22" (16-char hex, unchanged on resume)
-state.file_fingerprint        # "mtime_float-size" fast fingerprint (always present)
-state.file_mtime              # mtime of the local file
+# Session & theo dõi
+state.upload_session_id       # "a5f8bf53ebadba22" (16-char hex, không đổi khi resume)
+state.file_fingerprint        # "mtime_float-size" fast fingerprint (luôn có)
+state.file_mtime              # mtime của file cục bộ
 state.last_part_completed_at  # "2026-06-03T08:05:12Z"
-state.resumed_at              # "2026-06-03T08:06:00Z" (if resumed)
-state.resume_count            # 2 (number of resumes)
+state.resumed_at              # "2026-06-03T08:06:00Z" (nếu đã resume)
+state.resume_count            # 2 (số lần resume)
 state.started_at              # "2026-06-03T08:00:00Z"
 state.last_updated_at         # "2026-06-03T08:05:12Z"
 
-# Thread & in-progress tracking
-state.in_progress_part_numbers  # [14, 15] — parts currently uploading
+# Theo dõi luồng & in-progress
+state.in_progress_part_numbers  # [14, 15] — parts đang upload
 state.in_progress_parts         # {14 => "t2", 15 => "t0"}
 state.thread_states             # {"t0" => {status:, current_part:, parts_done:, ...}, ...}
 
-# Concise summary for logs
+# Tóm tắt ngắn gọn cho logs
 state.summary  # "parts=2/25 (8.0%) bytes=16777216/209715200 in_progress=[14, 15] threads=4"
 ```
 
 ---
 
-## DownloadState class
+## Lớp DownloadState
 
-OOP wrapper for resumable download state:
+Wrapper OOP cho trạng thái resumable download:
 
 ```ruby
-# Create new
+# Tạo mới
 state = S3MultiBucketClient::DownloadState.new(
   key:              'data/file.bin',
   bucket:           'my-bucket',
@@ -522,7 +522,7 @@ state.save_to_file('/tmp/dl-state.json')
 state = S3MultiBucketClient::DownloadState.from_json(json_string)
 state = S3MultiBucketClient::DownloadState.from_file('/tmp/dl-state.json')
 
-# Tracking methods
+# Phương thức theo dõi
 state.completed_parts_count   # 2
 state.total_parts             # 25
 state.progress_percentage     # 8.0
@@ -530,7 +530,7 @@ state.bytes_downloaded        # 16777216
 state.pending_part_numbers    # [3, 4, 5, ... 25]
 state.completed?              # false
 
-# Session & tracking
+# Session & theo dõi
 state.download_session_id     # "a5f8bf53..."
 state.resumed_at              # "2026-06-06T10:00:00Z"
 state.resume_count            # 1
@@ -542,12 +542,12 @@ state.summary  # "parts=2/25 (8.0%) bytes=16777216/209715200"
 
 ---
 
-## PartUploader class
+## Lớp PartUploader
 
-Standalone parallel uploader, works with UploadState:
+Trình upload song song độc lập, hoạt động với UploadState:
 
 ```ruby
-# Build an UploadState
+# Xây dựng UploadState
 state = S3MultiBucketClient::UploadState.new(
   upload_id:  upload_id,
   key:        'data/file.bin',
@@ -557,7 +557,7 @@ state = S3MultiBucketClient::UploadState.new(
   parts:      { 1 => '"etag1"' }
 )
 
-# Upload the missing parts
+# Upload các part còn thiếu
 uploader = S3MultiBucketClient::PartUploader.new(
   client, state,
   max_threads:       4,
@@ -569,7 +569,7 @@ uploader = S3MultiBucketClient::PartUploader.new(
 
 parts = uploader.upload_all!
 
-# Complete
+# Hoàn tất
 client.multipart_complete(
   bucket:    state.bucket,
   key:       state.key,
@@ -580,10 +580,10 @@ client.multipart_complete(
 
 ---
 
-## S3Helper convenience module
+## Module tiện ích S3Helper
 
 ```ruby
-# Auto-detect single/multipart
+# Tự động phát hiện single/multipart
 S3Helper.upload(
   client:    client,
   bucket:    'my-bucket',
@@ -591,7 +591,7 @@ S3Helper.upload(
   local_path: '/tmp/file.bin'
 )
 
-# Download with a progress bar
+# Download với progress bar
 S3Helper.download(
   client:        client,
   bucket:        'my-bucket',
@@ -600,7 +600,7 @@ S3Helper.download(
   show_progress: true
 )
 
-# Bulk upload a directory
+# Bulk upload thư mục
 S3Helper.upload_bulk(
   client:      client,
   directory:   './public/',
@@ -617,35 +617,35 @@ S3Helper.upload_bulk(
 
 ---
 
-## Logging & Observability
+## Logging & Quan sát
 
-`S3MultiBucketClient` has a 4-layer observability system: structured logging, debug mode, event callbacks, and thread-safe logging.
+`S3MultiBucketClient` có hệ thống quan sát 4 lớp: structured logging, debug mode, event callbacks, và thread-safe logging.
 
 ### Structured Logging
 
-3 ways to pass a logger:
+3 cách truyền logger:
 
 ```ruby
-# 1. Custom logger
+# 1. Logger tuỳ chỉnh
 client = S3MultiBucketClient.new(..., logger: Logger.new($stdout, level: Logger::INFO))
 
-# 2. Write to a file
+# 2. Ghi vào file
 client = S3MultiBucketClient.new(..., log_file: 'upload.log')
 
-# 3. Default STDOUT
+# 3. STDOUT mặc định
 client = S3MultiBucketClient.new(...)
 ```
 
-Custom formatter with millisecond timestamps:
+Custom formatter với timestamp mili giây:
 ```
 [2026-06-03 16:39:32.901] INFO -- [S3] upload_file start: "huge.bin" -> key="data/huge.bin" ...
 ```
 
-4 log levels: `DEBUG` (detailed HTTP), `INFO` (lifecycle), `WARN` (retries, mismatches), `ERROR` (failures).
+4 mức log: `DEBUG` (HTTP chi tiết), `INFO` (vòng đời), `WARN` (retry, không khớp), `ERROR` (lỗi).
 
-### Debug Mode
+### Chế độ Debug
 
-When `debug: true`, log every HTTP request/response in detail:
+Khi `debug: true`, log mọi HTTP request/response chi tiết:
 
 ```ruby
 client = S3MultiBucketClient.new(
@@ -655,7 +655,7 @@ client = S3MultiBucketClient.new(
 )
 ```
 
-Sample output:
+Ví dụ output:
 ```
 [2026-06-03 16:39:32.901] DEBUG -- [S3] [DETAILED REQUEST] PUT http://...
 [2026-06-03 16:39:32.901] DEBUG -- [S3]   Body size: 8388608 bytes
@@ -663,48 +663,48 @@ Sample output:
 [2026-06-03 16:39:33.100] DEBUG -- [S3]   Header: ETag: "abc123..."
 ```
 
-### Event Callbacks — 21 lifecycle events
+### Event Callbacks — 21 sự kiện vòng đời
 
-Register callbacks at the **class level** (applies to every instance):
+Đăng ký callback ở **cấp lớp** (áp dụng cho mọi instance):
 
-**Upload events:**
+**Sự kiện Upload:**
 
-| Event | Parameters | When it fires |
-|---|---|---|
-| `:upload_start` | `(local_path, key, total_size, total_parts, part_size, resumed)` | Upload starts |
-| `:upload_resume` | `(state)` | Resuming from a state file |
-| `:part_start` | `(part_number, total_parts, thread_id, offset, length)` | Thread starts a part |
-| `:part_complete` | `(part_number, total_parts, thread_id, etag, bytes, elapsed_ms, throughput)` | Part completes |
-| `:part_retry` | `(part_number, thread_id, attempt, max_retries, backoff, error)` | Retrying a part |
-| `:part_failed` | `(part_number, thread_id, error, exhausted)` | Part fails |
-| `:state_save` | `(state_snapshot, completed_count, total_parts, thread_id)` | State written to disk |
-| `:state_load` | `(state, path)` | State loaded on resume |
-| `:state_mismatch` | `(state, key, total_size)` | State doesn't match |
-| `:upload_complete` | `(result, elapsed, throughput)` | Upload succeeds |
-| `:upload_error` | `(key, upload_id, error)` | Upload fails |
+| Sự kiện | Tham số | Khi nào kích hoạt |
+|---------|---------|-------------------|
+| `:upload_start` | `(local_path, key, total_size, total_parts, part_size, resumed)` | Upload bắt đầu |
+| `:upload_resume` | `(state)` | Đang tiếp tục từ state file |
+| `:part_start` | `(part_number, total_parts, thread_id, offset, length)` | Luồng bắt đầu một part |
+| `:part_complete` | `(part_number, total_parts, thread_id, etag, bytes, elapsed_ms, throughput)` | Part hoàn thành |
+| `:part_retry` | `(part_number, thread_id, attempt, max_retries, backoff, error)` | Đang retry một part |
+| `:part_failed` | `(part_number, thread_id, error, exhausted)` | Part thất bại |
+| `:state_save` | `(state_snapshot, completed_count, total_parts, thread_id)` | State được ghi xuống đĩa |
+| `:state_load` | `(state, path)` | State được load khi resume |
+| `:state_mismatch` | `(state, key, total_size)` | State không khớp |
+| `:upload_complete` | `(result, elapsed, throughput)` | Upload thành công |
+| `:upload_error` | `(key, upload_id, error)` | Upload thất bại |
 
-**Download events:**
+**Sự kiện Download:**
 
-| Event | Parameters | When it fires |
-|---|---|---|
-| `:download_start` | `(key, total_size, total_parts, part_size, resumed)` | Download starts |
-| `:download_part_start` | `(part_number, total_parts, thread_id, offset, length)` | Thread starts a download part |
-| `:download_part_complete` | `(part_number, total_parts, thread_id, tempfile, bytes, elapsed_ms, throughput)` | Download part completes |
-| `:download_part_retry` | `(part_number, thread_id, attempt, max_retries, backoff, error)` | Retrying a download part |
-| `:download_part_failed` | `(part_number, thread_id, error)` | Download part fails |
-| `:download_complete` | `(result_hash, elapsed, throughput)` | Download succeeds |
-| `:download_failed` | `(error, state_file)` | Download fails |
+| Sự kiện | Tham số | Khi nào kích hoạt |
+|---------|---------|-------------------|
+| `:download_start` | `(key, total_size, total_parts, part_size, resumed)` | Download bắt đầu |
+| `:download_part_start` | `(part_number, total_parts, thread_id, offset, length)` | Luồng bắt đầu download part |
+| `:download_part_complete` | `(part_number, total_parts, thread_id, tempfile, bytes, elapsed_ms, throughput)` | Download part hoàn thành |
+| `:download_part_retry` | `(part_number, thread_id, attempt, max_retries, backoff, error)` | Đang retry download part |
+| `:download_part_failed` | `(part_number, thread_id, error)` | Download part thất bại |
+| `:download_complete` | `(result_hash, elapsed, throughput)` | Download thành công |
+| `:download_failed` | `(error, state_file)` | Download thất bại |
 
-**Common events:**
+**Sự kiện chung:**
 
-| Event | Parameters | When it fires |
-|---|---|---|
-| `:thread_start` | `(thread_id, thread_object_id)` | Worker thread starts |
-| `:thread_finish` | `(thread_id, thread_object_id, parts_processed)` | Worker thread ends |
-| `:log` | `(level, message, thread_id, timestamp)` | Custom log from a worker thread |
+| Sự kiện | Tham số | Khi nào kích hoạt |
+|---------|---------|-------------------|
+| `:thread_start` | `(thread_id, thread_object_id)` | Worker thread bắt đầu |
+| `:thread_finish` | `(thread_id, thread_object_id, parts_processed)` | Worker thread kết thúc |
+| `:log` | `(level, message, thread_id, timestamp)` | Log tuỳ chỉnh từ worker thread |
 
 ```ruby
-# Register a callback
+# Đăng ký callback
 cb = S3MultiBucketClient.on(:part_complete) do |pn, total, tid, etag, bytes, ms, speed|
   puts "#{tid} ✓ part #{pn}/#{total} #{bytes / 1024 / 1024} MB @ #{speed} MB/s"
 end
@@ -713,32 +713,32 @@ S3MultiBucketClient.on(:upload_complete) do |result, elapsed, throughput|
   notify_slack("Upload done: #{result.key} (#{'%.1f' % throughput} MB/s)")
 end
 
-# Unregister a callback
+# Huỷ đăng ký callback
 S3MultiBucketClient.off(:part_complete, cb)
 
-# Clear all
+# Xoá tất cả
 S3MultiBucketClient.clear_callbacks!
 ```
 
-**Use cases:** progress bar UI, retry/failure alerts, centralized logging, monitoring dashboard. Callback errors do not fail the upload.
+**Trường hợp sử dụng:** giao diện progress bar, cảnh báo retry/lỗi, logging tập trung, dashboard giám sát. Lỗi callback không làm hỏng upload.
 
 ### Thread-safe Logging
 
-Inside worker threads, **don't use `puts`** (output gets interleaved). Use:
+Bên trong worker threads, **không dùng `puts`** (output bị lẫn). Dùng:
 
 ```ruby
-# From a worker thread
+# Từ worker thread
 client.thread_log_info("custom message", "t0")
 client.thread_log_warn("warning", "t0")
 client.thread_log_error("error", "t0")
 ```
 
-Output format:
+Định dạng output:
 ```
 [2026-06-03 16:38:50.914] INFO -- [thread:t0] [S3] part 5/35 done
 ```
 
-### Debugging the state file after a crash
+### Gỡ lỗi state file sau crash
 
 ```ruby
 state = S3MultiBucketClient::UploadState.from_file('upload-state.json')
@@ -752,9 +752,9 @@ puts "Threads:    #{state.thread_states.keys.inspect}"
 
 ---
 
-## Manual testing against real S3
+## Kiểm thử thủ công với S3 thật
 
-### 1. Upload a file
+### 1. Upload một file
 
 ```ruby
 require_relative 's3_multi_bucket_client'
@@ -768,7 +768,7 @@ client = S3MultiBucketClient.new(
   logger:            Logger.new($stdout, level: Logger::INFO)
 )
 
-# Create a test file
+# Tạo file kiểm thử
 File.write('/tmp/test_small.txt', 'Hello from S3MultiBucketClient!')
 
 # Upload
@@ -781,18 +781,18 @@ result = client.upload_file(
 )
 puts "Upload: key=#{result.key} size=#{result.size}"
 
-# Verify with HEAD
+# Xác minh với HEAD
 info = client.head_object(bucket: ENV['S3_BUCKET'], key: 'test/small.txt')
 puts "HEAD: #{info.inspect}"
 
-# Cleanup
+# Dọn dẹp
 client.delete_object(bucket: ENV['S3_BUCKET'], key: 'test/small.txt')
 ```
 
-### 2. Upload a large file with resume
+### 2. Upload file lớn với resume
 
 ```ruby
-# Generate a 50MB file
+# Tạo file 50MB
 File.open('/tmp/test_big.bin', 'wb') do |f|
   50.times { f.write(SecureRandom.bytes(1024 * 1024)) }
 end
@@ -807,11 +807,11 @@ result = client.upload_file(
 )
 puts "\nDone! key=#{result.key}"
 
-# Cleanup
+# Dọn dẹp
 client.delete_object(bucket: ENV['S3_BUCKET'], key: 'test/big.bin')
 ```
 
-### 3. Download + verify
+### 3. Download + xác minh
 
 ```ruby
 result = client.download_file(
@@ -843,26 +843,26 @@ puts "Download URL: #{url}"
 
 ---
 
-## Running the automated test suite
+## Chạy bộ kiểm thử tự động
 
-### Requirements
+### Yêu cầu
 
 ```bash
 gem install aws-sigv4 webrick minitest
-# or
+# hoặc
 bundle install
 ```
 
-### Running tests
+### Chạy tests
 
 ```bash
-# From the project root
-rake test          # all tests (s3_client + s3_multi_bucket_client)
+# Từ thư mục gốc dự án
+rake test          # tất cả tests (s3_client + s3_multi_bucket_client)
 rake test:s3_multi_bucket_client
-rake test:quick    # skip memory/race (fast)
+rake test:quick    # bỏ qua memory/race (nhanh)
 ```
 
-### Running a single file
+### Chạy một file
 
 ```bash
 ruby tests/s3_multi_bucket_client/test_upload_state.rb
@@ -877,7 +877,7 @@ ruby tests/s3_multi_bucket_client/test_download_state.rb
 ruby tests/s3_multi_bucket_client/test_bulk_upload.rb
 ```
 
-### Running a single test
+### Chạy một test
 
 ```bash
 ruby tests/s3_multi_bucket_client/test_client.rb -n test_human_readable_size
@@ -889,24 +889,24 @@ ruby tests/s3_multi_bucket_client/test_client.rb -n test_human_readable_size
 ruby tests/interactive/upload_resume_s3_multi_bucket_client.rb
 ```
 
-### Test files
+### File kiểm thử
 
-| File | # tests | Description |
-|---|---|---|
-| `tests/s3_multi_bucket_client/test_upload_state.rb` | 9 | UploadState: creation, serialization, tracking, gap detection, session |
-| `tests/s3_multi_bucket_client/test_client.rb` | 52 | Client init, validation, utilities, constants, errors, XML, thread safety |
+| File | # tests | Mô tả |
+|------|---------|-------|
+| `tests/s3_multi_bucket_client/test_upload_state.rb` | 9 | UploadState: tạo, serialization, theo dõi, phát hiện gap, session |
+| `tests/s3_multi_bucket_client/test_client.rb` | 52 | Khởi tạo client, validation, utilities, constants, errors, XML, thread safety |
 | `tests/s3_multi_bucket_client/test_smoke.rb` | 17 | Upload (auto-dispatch), download, HEAD, DELETE, low-level multipart, S3Helper |
-| `tests/s3_multi_bucket_client/test_state.rb` | 3 | Full upload + state, resume from state, resume via resume_upload |
-| `tests/s3_multi_bucket_client/test_race.rb` | 2 | Concurrent upload monotonic state, resume from half |
-| `tests/s3_multi_bucket_client/test_memory.rb` | 1 | RAM measurement for a 200MB upload/download |
+| `tests/s3_multi_bucket_client/test_state.rb` | 3 | Upload đầy đủ + state, resume từ state, resume qua resume_upload |
+| `tests/s3_multi_bucket_client/test_race.rb` | 2 | Upload đồng thời kiểm tra state đơn điệu, resume từ nửa chừng |
+| `tests/s3_multi_bucket_client/test_memory.rb` | 1 | Đo RAM cho upload/download 200MB |
 | `tests/s3_multi_bucket_client/test_features.rb` | 40 | Presigned, list multipart, events, logging, session tracking, download stream, bulk |
 | `tests/s3_multi_bucket_client/test_coverage.rb` | 71 | Edge cases: error paths, state file, abort, list_buckets, download helpers |
-| `tests/s3_multi_bucket_client/test_download_state.rb` | 9 | DownloadState: creation, serialization, tracking, summary |
-| `tests/s3_multi_bucket_client/test_bulk_upload.rb` | 8 | Bulk upload: directory, patterns, excludes, callbacks, skip existing |
+| `tests/s3_multi_bucket_client/test_download_state.rb` | 9 | DownloadState: tạo, serialization, theo dõi, summary |
+| `tests/s3_multi_bucket_client/test_bulk_upload.rb` | 8 | Bulk upload: thư mục, pattern, exclude, callbacks, skip existing |
 
 ### Fake S3 server
 
-The test suite shares a fake S3 server (WEBrick) from `tests/support/fake_s3_server.rb`. The server supports:
+Bộ kiểm thử dùng chung fake S3 server (WEBrick) từ `tests/support/fake_s3_server.rb`. Server hỗ trợ:
 
 - Single PUT / GET / HEAD / DELETE
 - Multipart: initiate, upload part, complete, abort
@@ -914,7 +914,7 @@ The test suite shares a fake S3 server (WEBrick) from `tests/support/fake_s3_ser
 - Metadata (x-amz-meta-*), Cache-Control
 - List multipart uploads, list parts
 
-### Cleanup
+### Dọn dẹp
 
 ```bash
 rm -rf tests/tmp/
@@ -922,39 +922,39 @@ rm -rf tests/tmp/
 
 ---
 
-## Troubleshooting common errors
+## Xử lý lỗi thường gặp
 
 ### `ArgumentError: access_key_id is empty`
 
 ```ruby
-# Fix: check ENV before passing
+# Sửa: kiểm tra ENV trước khi truyền
 raise "Missing AWS credentials" unless ENV['S3_ACCESS_KEY_ID']
 ```
 
 ### `S3Error [403] Forbidden`
 
-- Verify the IAM policy has `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` permissions
-- For multipart: also requires `s3:ListMultipartUploadParts`, `s3:AbortMultipartUpload`
+- Xác minh IAM policy có quyền `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`
+- Cho multipart: cần thêm `s3:ListMultipartUploadParts`, `s3:AbortMultipartUpload`
 
-### `S3Error [404] Not Found` when resuming
+### `S3Error [404] Not Found` khi resume
 
-The multipart upload on S3 has expired (lifecycle rule, typically 7 days). Delete the state file and re-upload:
+Multipart upload trên S3 đã hết hạn (lifecycle rule, thường 7 ngày). Xoá state file và upload lại:
 
 ```ruby
 File.delete('/tmp/huge.upload.json') if File.exist?('/tmp/huge.upload.json')
 ```
 
-### Logger too noisy
+### Logger quá nhiều
 
 ```ruby
-# Lower the log level
+# Giảm mức log
 client = S3MultiBucketClient.new(
   ...,
   logger: Logger.new($stdout, level: Logger::WARN)
 )
 ```
 
-### Inspect which transient errors are retried
+### Kiểm tra lỗi transient nào được retry
 
 ```ruby
 client.transient_errors
@@ -964,91 +964,91 @@ client.transient_errors
 
 ---
 
-## Public method reference
+## Tham khảo phương thức công khai
 
-| Method | Description |
-|---|---|
-| `upload_file` | Upload (auto-dispatch: single PUT or multipart based on size) |
-| `resume_upload` | Resume from a state file |
-| `upload_directory` | Upload all files in a directory (parallel, with skip/resume) |
-| `download_file` | Streaming download (supports `range:`, `destination_path:`) |
-| `download_stream` | Block-based streaming (yields chunks, supports `range:`) |
-| `download_directory` | Download all files in a prefix to a local directory |
-| `head_object` | GET metadata → parsed Hash |
-| `delete_object` | Delete an object |
-| `presigned_url` | Generate a signed URL |
-| `list_buckets` | List all buckets in the account |
-| `list_objects` | List objects under a prefix |
-| `list_multipart_uploads` | List in-progress multipart uploads |
-| `list_parts` | List uploaded parts |
-| `abort_multipart_upload` | Abort a multipart upload |
-| `create_multipart_upload` | Initiate a multipart upload (returns upload_id) |
-| `multipart_start` | Alias for `create_multipart_upload` (low-level) |
-| `multipart_upload_part` | Upload a single part (low-level) |
-| `multipart_complete` | Complete a multipart upload (low-level) |
-| `multipart_abort` | Abort a multipart upload (low-level) |
-| `setup_logger` | Configure the logger |
-| `log_info/debug/warn/error` | Log with `[S3]` prefix |
-| `thread_log_info/debug/warn/error` | Thread-safe logging (queued messages) |
+| Phương thức | Mô tả |
+|-------------|-------|
+| `upload_file` | Upload (tự động dispatch: single PUT hoặc multipart dựa trên kích thước) |
+| `resume_upload` | Tiếp tục từ state file |
+| `upload_directory` | Upload tất cả file trong thư mục (song song, có skip/resume) |
+| `download_file` | Streaming download (hỗ trợ `range:`, `destination_path:`) |
+| `download_stream` | Streaming dạng block (yield chunks, hỗ trợ `range:`) |
+| `download_directory` | Download tất cả file theo prefix về thư mục cục bộ |
+| `head_object` | GET metadata → Hash đã parse |
+| `delete_object` | Xoá object |
+| `presigned_url` | Tạo URL ký |
+| `list_buckets` | Liệt kê tất cả buckets trong tài khoản |
+| `list_objects` | Liệt kê objects theo prefix |
+| `list_multipart_uploads` | Liệt kê multipart uploads đang thực hiện |
+| `list_parts` | Liệt kê các part đã upload |
+| `abort_multipart_upload` | Huỷ multipart upload |
+| `create_multipart_upload` | Bắt đầu multipart upload (trả về upload_id) |
+| `multipart_start` | Alias của `create_multipart_upload` (cấp thấp) |
+| `multipart_upload_part` | Upload một part (cấp thấp) |
+| `multipart_complete` | Hoàn tất multipart upload (cấp thấp) |
+| `multipart_abort` | Huỷ multipart upload (cấp thấp) |
+| `setup_logger` | Cấu hình logger |
+| `log_info/debug/warn/error` | Log với tiền tố `[S3]` |
+| `thread_log_info/debug/warn/error` | Thread-safe logging (hàng đợi message) |
 
-**Class methods** (called on `S3MultiBucketClient`):
+**Phương thức lớp** (gọi trên `S3MultiBucketClient`):
 
-| Method | Description |
-|---|---|
-| `S3MultiBucketClient.on(event, &block)` | Register a callback for an event (returns the proc) |
-| `S3MultiBucketClient.off(event, callback)` | Unregister a previously registered callback |
-| `S3MultiBucketClient.clear_callbacks!` | Clear all callbacks |
+| Phương thức | Mô tả |
+|-------------|-------|
+| `S3MultiBucketClient.on(event, &block)` | Đăng ký callback cho sự kiện (trả về proc) |
+| `S3MultiBucketClient.off(event, callback)` | Huỷ đăng ký callback |
+| `S3MultiBucketClient.clear_callbacks!` | Xoá tất cả callbacks |
 
-## Result objects
+## Đối tượng kết quả
 
-| Class | Fields |
-|---|---|
+| Lớp | Trường |
+|-----|--------|
 | `S3MultiBucketClient::UploadResult` | `key`, `size`, `etag`, `elapsed`, `throughput`, `extra` |
 | `S3MultiBucketClient::DownloadResult` | `path`, `size`, `elapsed`, `throughput`, `extra` |
 
-Access via `result.field`, `result[:field]`, or `result.to_h`.
+Truy cập qua `result.field`, `result[:field]`, hoặc `result.to_h`.
 
-## Nested classes
+## Các lớp lồng nhau
 
-| Class | Description |
-|---|---|
-| `S3MultiBucketClient::UploadState` | Resumable upload state wrapper |
-| `S3MultiBucketClient::DownloadState` | Resumable download state wrapper |
-| `S3MultiBucketClient::PartUploader` | Standalone parallel uploader |
-| `S3MultiBucketClient::PartDownloader` | Standalone parallel downloader (Range requests) |
-| `S3MultiBucketClient::S3Error` | Structured S3 error (parsed from XML response body) |
-| `S3MultiBucketClient::UploadError` | Upload-specific error (includes S3 error code/message) |
-| `S3MultiBucketClient::ResumableUploadError` | Resumable upload-specific error (subclass of UploadError) |
-| `S3MultiBucketClient::DownloadError` | Download-specific error |
+| Lớp | Mô tả |
+|-----|-------|
+| `S3MultiBucketClient::UploadState` | Wrapper trạng thái resumable upload |
+| `S3MultiBucketClient::DownloadState` | Wrapper trạng thái resumable download |
+| `S3MultiBucketClient::PartUploader` | Trình upload song song độc lập |
+| `S3MultiBucketClient::PartDownloader` | Trình download song song độc lập (Range requests) |
+| `S3MultiBucketClient::S3Error` | Lỗi S3 có cấu trúc (phân tích từ body XML phản hồi) |
+| `S3MultiBucketClient::UploadError` | Lỗi upload cụ thể (bao gồm mã lỗi/thông tin S3) |
+| `S3MultiBucketClient::ResumableUploadError` | Lỗi resumable upload cụ thể (con của UploadError) |
+| `S3MultiBucketClient::DownloadError` | Lỗi download cụ thể |
 
-### S3Error attributes
+### Thuộc tính S3Error
 
-`S3Error` parses the XML response body and provides structured access to the error details:
+`S3Error` phân tích body XML và cung cấp truy cập có cấu trúc đến chi tiết lỗi:
 
-| Attribute | Type | Description |
+| Thuộc tính | Kiểu | Mô tả |
 |---|---|---|
-| `code` | `String` | HTTP status code (e.g. `"404"`, `"403"`) |
-| `request_id` | `String` | AWS request ID from `x-amz-request-id` header |
-| `s3_code` | `String` | S3 error code from XML `<Code>` (e.g. `"NoSuchBucket"`) |
-| `s3_message` | `String` | S3 error message from XML `<Message>` |
-| `s3_bucket` | `String` | Bucket name from XML `<BucketName>` |
+| `code` | `String` | Mã trạng thái HTTP (ví dụ: `"404"`, `"403"`) |
+| `request_id` | `String` | AWS request ID từ header `x-amz-request-id` |
+| `s3_code` | `String` | Mã lỗi S3 từ XML `<Code>` (ví dụ: `"NoSuchBucket"`) |
+| `s3_message` | `String` | Thông báo lỗi S3 từ XML `<Message>` |
+| `s3_bucket` | `String` | Tên bucket từ XML `<BucketName>` |
 
-### URL encoding in build_uri
+### Mã hóa URL trong build_uri
 
-Object keys are URL-encoded when building the request URI, but forward slashes (`/`) in keys are preserved to maintain the hierarchical structure. Each path segment is individually encoded using `CGI.escape`, with `+` replaced by `%20` and `%7E` replaced by `~`.
+Keys đối tượng được mã hóa URL khi xây dựng URI request, nhưng dấu gạch chéo (`/`) trong keys được giữ nguyên để duy trì cấu trúc phân cấp. Mỗi đoạn đường dẫn được mã hóa riêng lẻ bằng `CGI.escape`, với `+` được thay bằng `%20` và `%7E` được thay bằng `~`.
 
 ```ruby
-# A key like "path/to/file.txt" is encoded as:
-# /bucket/path/to/file.txt  (slashes preserved)
+# Key dạng "path/to/file.txt" được mã hóa thành:
+# /bucket/path/to/file.txt  (giữ nguyên slashes)
 
-# A key with spaces like "my file.txt" is encoded as:
+# Key có khoảng trắng dạng "my file.txt" được mã hóa thành:
 # /bucket/my%20file.txt
 ```
 
-### Endpoint validation
+### Xác thực endpoint
 
-When constructing an `S3MultiBucketClient`, the `endpoint:` URL is validated to ensure it starts with `http://` or `https://` and has a valid hostname. Invalid endpoints raise `ArgumentError` at construction time.
+Khi xây dựng `S3MultiBucketClient`, URL `endpoint:` được kiểm tra để đảm bảo bắt đầu bằng `http://` hoặc `https://` và có hostname hợp lệ. Endpoint không hợp lệ ném `ArgumentError` tại thời điểm khởi tạo.
 
-### XML response validation
+### Xác thực phản hồi XML
 
-Before parsing XML responses (e.g. from `list_objects`, `list_multipart_uploads`, `list_parts`), the client validates the response Content-Type. If the response is explicitly non-XML (e.g. HTML), an `S3Error` is raised with a descriptive message instead of a cryptic REXML parse error.
+Trước khi phân tích các phản hồi XML (ví dụ từ `list_objects`, `list_multipart_uploads`, `list_parts`), client kiểm tra Content-Type của phản hồi. Nếu phản hồi rõ ràng không phải XML (ví dụ HTML), `S3Error` được ném với thông báo mô tả thay vì lỗi REXML khó hiểu.
